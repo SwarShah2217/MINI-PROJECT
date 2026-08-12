@@ -13,6 +13,8 @@
 const dgram = require("dgram");
 const os = require("os");
 
+const DeviceRegistry = require("./deviceRegistry");
+
 const {
     DISCOVERY_PORT,
     DISCOVERY_INTERVAL,
@@ -30,6 +32,15 @@ class DiscoveryService {
         // Get this laptop's name.
         // Example: "Swar-Laptop"
         this.deviceName = os.hostname();
+
+        this.deviceRegistry = new DeviceRegistry();
+        // existing event handlers remain here
+
+         // Remove devices that have not responded recently
+        this.cleanupInterval = setInterval(() => {
+        this.deviceRegistry.removeStaleDevices();
+        }, 5000);
+
 
         // Set up what should happen when
         // the socket receives a message.
@@ -192,14 +203,16 @@ class DiscoveryService {
     }
 
     handleDiscoveryResponse(data) {
+    this.deviceRegistry.addOrUpdateDevice({
+        deviceName: data.deviceName,
+        ip: data.ip
+    });
 
-        // Print the device information received
-        // from another laptop.
-        console.log("\nNearby device found:");
-        console.log(data.deviceName);
-        console.log(data.ip);
-        console.log();
-    }
+    console.log(`Discovered device: ${data.deviceName} (${data.ip})`);
+
+    console.log("Active devices:");
+    console.table(this.deviceRegistry.getDevices());
+}
 
 
     getLocalIPAddress() {
