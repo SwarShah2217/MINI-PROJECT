@@ -1,0 +1,3 @@
+UDP Socket - done
+TCP connection - 
+message -> file -> transfer - 
