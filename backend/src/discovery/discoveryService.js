@@ -147,7 +147,7 @@ class DiscoveryService {
 
             // Check whether this is a discovery response.
             if (data.type === "DISCOVER_RESPONSE") {
-                this.handleDiscoveryResponse(data);
+                this.handleDiscoveryResponse(data, remoteInfo);
             }
         } catch (error) {
             // The message wasn't valid JSON.
@@ -202,13 +202,16 @@ class DiscoveryService {
         );
     }
 
-    handleDiscoveryResponse(data) {
+    handleDiscoveryResponse(data, remoteInfo) {
+
     this.deviceRegistry.addOrUpdateDevice({
         deviceName: data.deviceName,
-        ip: data.ip
+        ip: remoteInfo.address
     });
 
-    console.log(`Discovered device: ${data.deviceName} (${data.ip})`);
+    console.log(
+        `Discovered device: ${data.deviceName} (${remoteInfo.address})`
+    );
 
     console.log("Active devices:");
     console.table(this.deviceRegistry.getDevices());
