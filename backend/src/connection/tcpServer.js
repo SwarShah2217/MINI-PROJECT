@@ -7,6 +7,9 @@ class TCPServer {
         this.server = net.createServer((socket) => {
             this.handleConnection(socket);
         });
+
+        // No connection request is pending when the server starts
+        this.pendingSocket = null;
     }
 
     start() {
@@ -27,12 +30,8 @@ class TCPServer {
             if (message.type === "CONNECTION_REQUEST") {
                 console.log("Connection request received");
 
-                // Temporary auto-accept for testing
-                const response = {
-                type: "CONNECTION_ACCEPTED"
-                };
-
-               socket.write(JSON.stringify(response));
+                // Store the pending connection request until it is accepted or rejected
+                this.pendingSocket = socket;
             }
 
         } catch (error) {
@@ -47,6 +46,42 @@ class TCPServer {
         socket.on("error", (error) => {
             console.error("TCP socket error:", error.message);
         });
+    }
+
+    acceptConnection() {
+        if (!this.pendingSocket) {
+            console.log("No pending connection request");
+            return;
+        }
+
+        const response = {
+            type: "CONNECTION_ACCEPTED"
+        };
+
+        this.pendingSocket.write(JSON.stringify(response));
+
+        console.log("Connection accepted");
+
+        this.pendingSocket = null;
+    }
+
+    rejectConnection() {
+        if (!this.pendingSocket) {
+            console.log("No pending connection request");
+            return;
+        }
+
+        const response = {
+            type: "CONNECTION_REJECTED"
+        };
+
+        this.pendingSocket.write(JSON.stringify(response));
+
+        console.log("Connection rejected");
+
+        this.pendingSocket.end();
+
+        this.pendingSocket = null;
     }
 }
 

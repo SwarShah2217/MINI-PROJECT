@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SyncLAN</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <h1>SyncLAN</h1>
+
+    <p>LAN File Transfer System</p>
+
+    <!-- Displays SyncLAN devices discovered on the local network -->
+    <div class="devices-section">
+
+        <h2>Nearby Devices</h2>
+
+        <div id="deviceList">
+            <p>No devices found.</p>
+        </div>
+
+    </div>
+
+    <div id="connectionRequest" class="request-box hidden">
+
+        <h2>Incoming Connection Request</h2>
+
+        <p id="requestMessage">
+            Another device wants to connect.
+        </p>
+
+        <button id="acceptButton">Accept</button>
+
+        <button id="rejectButton">Reject</button>
+
+    </div>
+
+    <p id="status">
+        Waiting for devices...
+    </p>
+
+    <script src="script.js"></script>
+
+</body>
+
+</html>

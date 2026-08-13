@@ -8,6 +8,9 @@ const TCPServer = require("./src/connection/tcpServer");
 // Import the outgoing TCP connection manager
 const ConnectionManager = require("./src/connection/connectionManager");
 
+// Import the local web interface server
+const WebServer = require("./src/web/webServer");
+
 // Create the discovery service.
 const discoveryService = new DiscoveryService();
 
@@ -17,9 +20,16 @@ const tcpServer = new TCPServer();
 // Create the outgoing TCP connection manager
 const connectionManager = new ConnectionManager();
 
+// Give the web server access to TCP connections and discovered devices
+const webServer = new WebServer(tcpServer, discoveryService, connectionManager);
+
 // Start UDP device discovery.
 discoveryService.start();
 
 // Start listening for incoming TCP connections
 tcpServer.start();
+
+// Start the local web interface
+webServer.start();
+
 
