@@ -374,11 +374,55 @@ sendFileButton.addEventListener("click", async () => {
         }
 
         selectedFile.textContent =
-            `${file.name} uploaded and ready to send.`;
+            `${file.name} uploaded. Sending transfer request...`;
 
         console.log(
             "File uploaded successfully:",
             result
+        );
+
+
+        // Tell the backend to send the file transfer request
+        const transferResponse = await fetch(
+            "/api/transfer/request",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+                    fileName: file.name,
+                    fileSize: file.size
+                })
+            }
+        );
+
+        const transferResult =
+            await transferResponse.json();
+
+
+        if (!transferResult.success) {
+
+            selectedFile.textContent =
+                "Could not send file transfer request.";
+
+            console.error(
+                "Transfer request failed:",
+                transferResult
+            );
+
+            return;
+        }
+
+
+        selectedFile.textContent =
+            `${file.name} transfer request sent. Waiting for approval...`;
+
+        console.log(
+            "Transfer request sent successfully:",
+            transferResult
         );
 
     } catch (error) {
