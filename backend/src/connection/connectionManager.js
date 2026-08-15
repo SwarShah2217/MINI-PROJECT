@@ -4,9 +4,12 @@ const { TCP_PORT } = require("../config");
 
 class ConnectionManager {
 
-    constructor(connectionState) {
+    constructor(connectionState, transferManager) {
         // Shared connection state used by sender and receiver
         this.connectionState = connectionState;
+
+        // Used to create the separate file-transfer connection
+        this.transferManager = transferManager;
     }
 
     connectToDevice(ip) {
@@ -67,7 +70,27 @@ class ConnectionManager {
                 }
 
                 if (message.type === "FILE_TRANSFER_ACCEPTED") {
+
                     console.log("File transfer accepted by peer");
+
+                    this.transferManager
+                        .connectForFileTransfer(ip)
+                        .then((fileSocket) => {
+
+                            console.log(
+                                "Ready to send file data"
+                            );
+
+                            this.transferManager.sendFile(fileSocket);
+
+                        })
+                        .catch((error) => {
+
+                            console.error(
+                                "Could not establish file transfer connection:",
+                                error.message
+                            );
+                        });
                 }
 
                 if (message.type === "FILE_TRANSFER_REJECTED") {

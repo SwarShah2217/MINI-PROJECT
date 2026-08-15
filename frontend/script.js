@@ -333,54 +333,65 @@ fileInput.addEventListener("change", () => {
     }
 });
 
-// Send the selected file information to the backend
+// Upload the selected file to the local Node.js backend
 sendFileButton.addEventListener("click", async () => {
 
     const file = fileInput.files[0];
 
-    // Make sure a file has been selected
     if (!file) {
-        selectedFile.textContent = "Please select a file first.";
+        selectedFile.textContent =
+            "Please select a file first.";
         return;
     }
 
     try {
 
+        selectedFile.textContent =
+            `Uploading ${file.name}...`;
+
         const response = await fetch(
-            "/api/transfer/request",
+            "/api/transfer/upload",
             {
                 method: "POST",
 
                 headers: {
-                    "Content-Type": "application/json"
+                    "X-File-Name": file.name
                 },
 
-                body: JSON.stringify({
-                    fileName: file.name,
-                    fileSize: file.size
-                })
+                body: file
             }
         );
 
-        const result = await response.json();
+        const result =
+            await response.json();
 
-        if (result.success) {
+        if (!result.success) {
+
             selectedFile.textContent =
-                `Transfer request sent for ${file.name}`;
-        } else {
-            selectedFile.textContent =
-                "Unable to send transfer request.";
+                "File upload failed.";
+
+            return;
         }
+
+        selectedFile.textContent =
+            `${file.name} uploaded and ready to send.`;
+
+        console.log(
+            "File uploaded successfully:",
+            result
+        );
 
     } catch (error) {
 
         console.error(
-            "File transfer request error:",
+            "File upload error:",
             error
         );
+
+        selectedFile.textContent =
+            "File upload failed.";
     }
 });
-
 
 
 // Accept incoming connection

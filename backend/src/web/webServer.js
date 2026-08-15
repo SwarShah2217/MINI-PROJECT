@@ -44,8 +44,8 @@ class WebServer {
 
             const response = {
                 pending: socket !== null,
-                ip: socket 
-                    ? socket.remoteAddress.replace("::ffff:", "") 
+                ip: socket
+                    ? socket.remoteAddress.replace("::ffff:", "")
                     : null
             };
 
@@ -99,7 +99,7 @@ class WebServer {
         }
 
         // Send the list of currently discovered LAN devices
-        if ( req.url === "/api/devices" && req.method === "GET"){
+        if (req.url === "/api/devices" && req.method === "GET") {
             const devices = this.discoveryService.deviceRegistry.getDevices();
 
             res.writeHead(200, {
@@ -223,6 +223,91 @@ class WebServer {
             return;
         }
 
+        // Receive the selected file from the browser
+        if (
+            req.url === "/api/transfer/upload" &&
+            req.method === "POST"
+        ) {
+
+            const tempDirectory = path.join(
+                __dirname,
+                "../../temp"
+            );
+
+            // Create temp directory if it does not exist
+            if (!fs.existsSync(tempDirectory)) {
+                fs.mkdirSync(tempDirectory, {
+                    recursive: true
+                });
+            }
+
+            let fileName = req.headers["x-file-name"];
+
+            if (!fileName) {
+
+                res.writeHead(400, {
+                    "Content-Type": "application/json"
+                });
+
+                res.end(JSON.stringify({
+                    success: false,
+                    message: "File name is missing"
+                }));
+
+                return;
+            }
+
+            // Prevent a browser-supplied path from escaping temp/
+            fileName = path.basename(fileName);
+
+            const filePath = path.join(
+                tempDirectory,
+                fileName
+            );
+
+            const writeStream =
+                fs.createWriteStream(filePath);
+
+            req.pipe(writeStream);
+
+            req.on("end", () => {
+
+                console.log(
+                    `File temporarily stored: ${fileName}`
+                );
+
+                res.writeHead(200, {
+                    "Content-Type": "application/json"
+                });
+
+                res.end(JSON.stringify({
+                    success: true,
+                    fileName: fileName,
+                    filePath: filePath
+                }));
+            });
+
+            req.on("error", (error) => {
+
+                console.error(
+                    "File upload error:",
+                    error.message
+                );
+
+                writeStream.destroy();
+
+                res.writeHead(500, {
+                    "Content-Type": "application/json"
+                });
+
+                res.end(JSON.stringify({
+                    success: false
+                }));
+            });
+
+            return;
+        }
+
         // Send pending file transfer request to the webpage
         if (
             req.url === "/api/transfer/pending" &&
@@ -292,7 +377,7 @@ class WebServer {
             );
 
             return;
-}
+        }
 
         // Decide which frontend file the browser is requesting
         let filePath;

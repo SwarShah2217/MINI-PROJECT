@@ -11,12 +11,16 @@ const DISCOVERY_INTERVAL = 5000;
 // "Send this message to all devices on my local network"
 const BROADCAST_ADDRESS = "255.255.255.255";
 
-// TCP port used for peer-to-peer connections and file transfers
+// TCP port used by SyncLAN for peer-to-peer connections
 const TCP_PORT = 5000;
+
+// TCP port used for actual file data transfer
+const FILE_TRANSFER_PORT = 5001;
 
 module.exports = {
     DISCOVERY_PORT,
     DISCOVERY_INTERVAL,
     BROADCAST_ADDRESS,
-    TCP_PORT
+    TCP_PORT,
+    FILE_TRANSFER_PORT
 };
