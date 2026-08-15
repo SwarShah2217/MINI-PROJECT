@@ -308,6 +308,21 @@ class WebServer {
             return;
         }
 
+        // Check outgoing file transfer status
+        if (
+            req.url === "/api/transfer/out-status" &&
+            req.method === "GET"
+        ) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            const isPending = this.transferManager.pendingFile !== null;
+            const status = isPending ? this.transferManager.pendingFile.status : "idle";
+            res.end(JSON.stringify({ 
+                isPending: isPending,
+                status: status
+            }));
+            return;
+        }
+
         // Send pending file transfer request to the webpage
         if (
             req.url === "/api/transfer/pending" &&

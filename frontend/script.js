@@ -102,6 +102,14 @@ async function loadConnectionStatus() {
             if (!fileInput.files.length) {
                 selectedFile.textContent =
                     "No file selected.";
+            } else if (selectedFile.textContent.includes("Waiting for approval...") || selectedFile.textContent.includes("Transfer accepted, sending...")) {
+                const res = await fetch("/api/transfer/out-status");
+                const outStatus = await res.json();
+                if (!outStatus.isPending) {
+                    selectedFile.textContent = "File transferred successfully.";
+                } else if (outStatus.status === "transferring" && !selectedFile.textContent.includes("Transfer accepted, sending...")) {
+                    selectedFile.textContent = "Transfer accepted, sending...";
+                }
             }
 
         }

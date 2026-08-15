@@ -51,7 +51,8 @@ class TransferManager {
         this.pendingFile = {
             fileName: fileName,
             fileSize: fileSize,
-            filePath: filePath
+            filePath: filePath,
+            status: "pending"
         };
 
         const request = {
@@ -145,6 +146,8 @@ class TransferManager {
 
             return;
         }
+
+        this.pendingFile.status = "transferring";
 
         const file = this.pendingFile;
 
