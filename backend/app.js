@@ -10,6 +10,9 @@ const ConnectionManager = require("./src/connection/connectionManager");
 const ConnectionState =
     require("./src/connection/connectionState");
 
+const TransferManager =
+    require("./src/transfer/transferManager");
+
 // Import the local web interface server
 const WebServer = require("./src/web/webServer");
 
@@ -19,6 +22,9 @@ const discoveryService = new DiscoveryService();
 // Shared state used by incoming and outgoing TCP connections
 const connectionState =
     new ConnectionState();
+
+const transferManager =
+    new TransferManager(connectionState);
 
 // Create the TCP server instance
 const tcpServer =
@@ -30,7 +36,7 @@ const connectionManager =
     new ConnectionManager(connectionState);
 
 // Give the web server access to TCP connections and discovered devices
-const webServer = new WebServer(tcpServer, discoveryService, connectionManager);
+const webServer = new WebServer(tcpServer, discoveryService, connectionManager,transferManager);
 
 // Start UDP device discovery.
 discoveryService.start();

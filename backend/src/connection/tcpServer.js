@@ -15,6 +15,9 @@ class TCPServer {
 
         // No incoming request initially
         this.pendingSocket = null;
+
+        // No file transfer request is pending initially
+        this.pendingFileRequest = null;
     }
 
 
@@ -71,6 +74,20 @@ class TCPServer {
                         socket
                     );
                 }
+
+                if (message.type === "FILE_TRANSFER_REQUEST") {
+                    console.log(
+                        `Incoming file request: ${message.fileName} (${message.fileSize} bytes)`
+                    );
+
+                    // Store file request until user accepts or rejects it
+                    this.pendingFileRequest = {
+                        fileName: message.fileName,
+                        fileSize: message.fileSize,
+                        socket: socket
+                    };
+                }
+
 
             } catch (error) {
 
@@ -175,6 +192,54 @@ class TCPServer {
         socket.end();
 
         console.log("Connection rejected");
+
+        return true;
+    }
+
+    acceptFileTransfer() {
+        if (!this.pendingFileRequest) {
+            console.log("No pending file transfer request");
+            return false;
+        }
+
+        const socket = this.pendingFileRequest.socket;
+
+        socket.write(
+            JSON.stringify({
+                type: "FILE_TRANSFER_ACCEPTED"
+            })
+        );
+
+        console.log(
+            `File transfer accepted: ${this.pendingFileRequest.fileName}`
+        );
+
+        this.pendingFileRequest = null;
+
+        return true;
+    }
+
+
+    rejectFileTransfer() {
+
+        if (!this.pendingFileRequest) {
+            console.log("No pending file transfer request");
+            return false;
+        }
+
+        const socket = this.pendingFileRequest.socket;
+
+        socket.write(
+            JSON.stringify({
+                type: "FILE_TRANSFER_REJECTED"
+            })
+        );
+
+        console.log(
+            `File transfer rejected: ${this.pendingFileRequest.fileName}`
+        );
+
+        this.pendingFileRequest = null;
 
         return true;
     }

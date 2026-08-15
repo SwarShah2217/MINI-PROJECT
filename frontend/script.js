@@ -25,6 +25,17 @@ const sendFileButton =
 const selectedFile =
     document.getElementById("selectedFile");
 
+const fileRequestBox =
+    document.getElementById("fileRequestBox");
+
+const fileRequestMessage =
+    document.getElementById("fileRequestMessage");
+
+const acceptFileButton =
+    document.getElementById("acceptFileButton");
+
+const rejectFileButton =
+    document.getElementById("rejectFileButton");
 
 // Current TCP connection state
 let currentConnectionStatus = {
@@ -136,8 +147,6 @@ async function loadConnectionStatus() {
         }
 
 
-        // Refresh device buttons using latest status
-        loadDevices();
 
     } catch (error) {
 
@@ -272,6 +281,38 @@ async function loadDevices() {
     }
 }
 
+// Check for incoming file transfer requests
+async function checkPendingFileRequest() {
+
+    try {
+
+        const response =
+            await fetch("/api/transfer/pending");
+
+        const data =
+            await response.json();
+
+
+        if (data.pending) {
+
+            fileRequestBox.classList.remove("hidden");
+
+            fileRequestMessage.textContent =
+                `${data.fileName} (${data.fileSize} bytes)`;
+
+        } else {
+
+            fileRequestBox.classList.add("hidden");
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Unable to check file transfer request:",
+            error
+        );
+    }
+}
 
 // Display selected file information
 fileInput.addEventListener("change", () => {
@@ -291,6 +332,55 @@ fileInput.addEventListener("change", () => {
             "No file selected.";
     }
 });
+
+// Send the selected file information to the backend
+sendFileButton.addEventListener("click", async () => {
+
+    const file = fileInput.files[0];
+
+    // Make sure a file has been selected
+    if (!file) {
+        selectedFile.textContent = "Please select a file first.";
+        return;
+    }
+
+    try {
+
+        const response = await fetch(
+            "/api/transfer/request",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+                    fileName: file.name,
+                    fileSize: file.size
+                })
+            }
+        );
+
+        const result = await response.json();
+
+        if (result.success) {
+            selectedFile.textContent =
+                `Transfer request sent for ${file.name}`;
+        } else {
+            selectedFile.textContent =
+                "Unable to send transfer request.";
+        }
+
+    } catch (error) {
+
+        console.error(
+            "File transfer request error:",
+            error
+        );
+    }
+});
+
 
 
 // Accept incoming connection
@@ -326,6 +416,39 @@ rejectButton.addEventListener(
     }
 );
 
+// Accept incoming file transfer
+acceptFileButton.addEventListener(
+    "click",
+    async () => {
+
+        await fetch(
+            "/api/transfer/accept",
+            {
+                method: "POST"
+            }
+        );
+
+        fileRequestBox.classList.add("hidden");
+    }
+);
+
+
+// Reject incoming file transfer
+rejectFileButton.addEventListener(
+    "click",
+    async () => {
+
+        await fetch(
+            "/api/transfer/reject",
+            {
+                method: "POST"
+            }
+        );
+
+        fileRequestBox.classList.add("hidden");
+    }
+);
+
 
 // Check incoming requests every second
 setInterval(
@@ -348,9 +471,19 @@ setInterval(
 );
 
 
+
 // Initial page load
 checkPendingConnection();
 
 loadConnectionStatus();
 
 loadDevices();
+
+// Check for incoming file requests every second
+setInterval(
+    checkPendingFileRequest,
+    1000
+);
+
+// Check immediately when page loads
+checkPendingFileRequest();

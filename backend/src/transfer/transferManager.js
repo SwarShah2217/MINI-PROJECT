@@ -1,24 +1,37 @@
-const fs = require("fs");
-const path = require("path");
-
 class TransferManager {
 
-    constructor(connectionManager) {
-        // Used to send transfer requests through an existing TCP connection
-        this.connectionManager = connectionManager;
+    constructor(connectionState) {
+        // Shared connection state gives access to the active TCP socket
+        this.connectionState = connectionState;
     }
 
-    // Create file metadata before starting transfer
-    createTransferRequest(filePath) {
+    // Send file metadata to the connected peer
+    sendTransferRequest(fileName, fileSize) {
 
-        const fileStats = fs.statSync(filePath);
+        // File request can only be sent after connection is established
+        if (this.connectionState.status !== "connected") {
+            return false;
+        }
 
-        return {
+        const socket = this.connectionState.socket;
+
+        if (!socket) {
+            return false;
+        }
+
+        const request = {
             type: "FILE_TRANSFER_REQUEST",
-            fileName: path.basename(filePath),
-            fileSize: fileStats.size,
-            filePath: filePath
+            fileName: fileName,
+            fileSize: fileSize
         };
+
+        socket.write(JSON.stringify(request));
+
+        console.log(
+            `File transfer request sent: ${fileName} (${fileSize} bytes)`
+        );
+
+        return true;
     }
 }
 

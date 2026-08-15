@@ -66,6 +66,14 @@ class ConnectionManager {
                     socket.end();
                 }
 
+                if (message.type === "FILE_TRANSFER_ACCEPTED") {
+                    console.log("File transfer accepted by peer");
+                }
+
+                if (message.type === "FILE_TRANSFER_REJECTED") {
+                    console.log("File transfer rejected by peer");
+                }
+
             } catch (error) {
 
                 console.error(

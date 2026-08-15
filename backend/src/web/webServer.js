@@ -6,13 +6,14 @@ const path = require("path");
 
 class WebServer {
 
-    constructor(tcpServer, discoveryService, connectionManager) {
+    constructor(tcpServer, discoveryService, connectionManager, transferManager) {
 
         // Store TCP server so the webpage can access connection requests
         this.tcpServer = tcpServer;
         // Access discovered devices and create outgoing TCP connections
         this.discoveryService = discoveryService;
         this.connectionManager = connectionManager;
+        this.transferManager = transferManager;
 
         // Create the local HTTP server
         this.server = http.createServer((req, res) => {
@@ -167,6 +168,131 @@ class WebServer {
 
             return;
         }
+
+        // Send a file transfer request to the connected peer
+        if (
+            req.url === "/api/transfer/request" &&
+            req.method === "POST"
+        ) {
+
+            let body = "";
+
+            req.on("data", (chunk) => {
+                body += chunk.toString();
+            });
+
+            req.on("end", () => {
+
+                try {
+
+                    const data = JSON.parse(body);
+
+                    const success =
+                        this.transferManager.sendTransferRequest(
+                            data.fileName,
+                            data.fileSize
+                        );
+
+                    res.writeHead(
+                        success ? 200 : 400,
+                        {
+                            "Content-Type": "application/json"
+                        }
+                    );
+
+                    res.end(
+                        JSON.stringify({
+                            success: success
+                        })
+                    );
+
+                } catch (error) {
+
+                    res.writeHead(400, {
+                        "Content-Type": "application/json"
+                    });
+
+                    res.end(
+                        JSON.stringify({
+                            success: false
+                        })
+                    );
+                }
+            });
+
+            return;
+        }
+
+        // Send pending file transfer request to the webpage
+        if (
+            req.url === "/api/transfer/pending" &&
+            req.method === "GET"
+        ) {
+            const fileRequest = this.tcpServer.pendingFileRequest;
+
+            const response = {
+                pending: fileRequest !== null,
+                fileName: fileRequest ? fileRequest.fileName : null,
+                fileSize: fileRequest ? fileRequest.fileSize : null
+            };
+
+            res.writeHead(200, {
+                "Content-Type": "application/json"
+            });
+
+            res.end(JSON.stringify(response));
+
+            return;
+        }
+
+        // Accept incoming file transfer request
+        if (
+            req.url === "/api/transfer/accept" &&
+            req.method === "POST"
+        ) {
+            const success =
+                this.tcpServer.acceptFileTransfer();
+
+            res.writeHead(
+                success ? 200 : 400,
+                {
+                    "Content-Type": "application/json"
+                }
+            );
+
+            res.end(
+                JSON.stringify({
+                    success: success
+                })
+            );
+
+            return;
+        }
+
+
+        // Reject incoming file transfer request
+        if (
+            req.url === "/api/transfer/reject" &&
+            req.method === "POST"
+        ) {
+            const success =
+                this.tcpServer.rejectFileTransfer();
+
+            res.writeHead(
+                success ? 200 : 400,
+                {
+                    "Content-Type": "application/json"
+                }
+            );
+
+            res.end(
+                JSON.stringify({
+                    success: success
+                })
+            );
+
+            return;
+}
 
         // Decide which frontend file the browser is requesting
         let filePath;
