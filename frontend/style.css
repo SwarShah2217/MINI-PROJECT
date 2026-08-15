@@ -32,6 +32,16 @@ button {
     margin: 10px 0;
 }
 
+
+.file-section {
+    width: 400px;
+    margin: 30px auto;
+    padding: 15px;
+
+    border: 1px solid #ccc;
+    border-radius: 8px;
+}
+
 .hidden {
     display: none;
 }

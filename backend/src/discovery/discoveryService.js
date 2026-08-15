@@ -77,6 +77,26 @@ class DiscoveryService {
         });
     }
 
+    getLocalIPAddresses() {
+        const interfaces = os.networkInterfaces();
+
+        const addresses = [];
+
+        for (const interfaceName of Object.keys(interfaces)) {
+
+            for (const networkInterface of interfaces[interfaceName]) {
+
+                if (
+                    networkInterface.family === "IPv4" &&
+                    !networkInterface.internal
+                ) {
+                    addresses.push(networkInterface.address);
+                }
+            }
+        }
+
+        return addresses;
+    }
 
     startBroadcasting() {
 
@@ -122,7 +142,10 @@ class DiscoveryService {
         // Ignore messages coming from this same laptop.
         // Otherwise, our own broadcast will look like
         // another device's DISCOVER message.
-        if (remoteInfo.address === this.getLocalIPAddress()) {
+        const localAddresses = this.getLocalIPAddresses();
+
+        // Ignore packets sent by this same computer
+        if (localAddresses.includes(remoteInfo.address)) {
             return;
         }
 

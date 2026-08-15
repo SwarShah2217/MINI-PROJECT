@@ -43,7 +43,9 @@ class WebServer {
 
             const response = {
                 pending: socket !== null,
-                ip: socket ? socket.remoteAddress : null
+                ip: socket 
+                    ? socket.remoteAddress.replace("::ffff:", "") 
+                    : null
             };
 
             res.writeHead(200, {
@@ -143,6 +145,26 @@ class WebServer {
                     }));
                 }
             });
+            return;
+        }
+
+        // Send current TCP connection status to the webpage
+        if (
+            req.url === "/api/connection/status" &&
+            req.method === "GET"
+        ) {
+
+            const status =
+                this.connectionManager.connectionState.getStatus();
+
+            res.writeHead(200, {
+                "Content-Type": "application/json"
+            });
+
+            res.end(
+                JSON.stringify(status)
+            );
+
             return;
         }
 
