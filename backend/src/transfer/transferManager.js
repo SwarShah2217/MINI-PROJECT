@@ -190,7 +190,7 @@ class TransferManager {
         });
 
         // Send the actual file bytes
-        readStream.pipe(fileSocket);
+        readStream.pipe(fileSocket, { end: false });
     }
 
     cleanupTemporaryFile() {
