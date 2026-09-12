@@ -8,8 +8,6 @@
 //      ↓
 // Send responses
 
-
-
 const dgram = require("dgram");
 const os = require("os");
 
@@ -17,206 +15,535 @@ const DeviceRegistry = require("./deviceRegistry");
 
 const {
     DISCOVERY_PORT,
-    DISCOVERY_INTERVAL,
-    BROADCAST_ADDRESS
-} = require("../config");  //taken from config.js
+    DISCOVERY_INTERVAL
+} = require("../config");
 
 
 class DiscoveryService {
+
     constructor() {
 
         // Create a UDP socket.
         // "udp4" means we are using IPv4.
         this.socket = dgram.createSocket("udp4");
 
-        // Get this laptop's name.
-        // Example: "Swar-Laptop"
+        // Get this laptop's hostname.
         this.deviceName = os.hostname();
 
+        // Store discovered devices.
         this.deviceRegistry = new DeviceRegistry();
-        // existing event handlers remain here
 
-         // Remove devices that have not responded recently
+        // Remove devices that have not responded recently.
         this.cleanupInterval = setInterval(() => {
-        this.deviceRegistry.removeStaleDevices();
+            this.deviceRegistry.removeStaleDevices();
         }, 5000);
 
 
-        // Set up what should happen when
-        // the socket receives a message.
+        // -----------------------------------------
+        // RECEIVE UDP MESSAGE
+        // -----------------------------------------
+
         this.socket.on("message", (message, remoteInfo) => {
             this.handleMessage(message, remoteInfo);
         });
 
-        // Handle any UDP socket errors.
+
+        // -----------------------------------------
+        // SOCKET ERROR
+        // -----------------------------------------
+
         this.socket.on("error", (error) => {
             console.error("UDP Socket Error:", error);
         });
 
-        // This event happens after socket.bind()
-        // successfully starts listening.
+
+        // -----------------------------------------
+        // SOCKET LISTENING
+        // -----------------------------------------
+
         this.socket.on("listening", () => {
+
             const address = this.socket.address();
+
             console.log(
                 `Listening for discovery on UDP port ${address.port}`
             );
         });
     }
 
+
+    // =========================================================
+    // START DISCOVERY SERVICE
+    // =========================================================
+
     start() {
-        // Start listening on UDP port 41234.
+
         this.socket.bind(DISCOVERY_PORT, () => {
 
-            // Allow this socket to send broadcast messages.
+            // Allow UDP broadcast messages.
             this.socket.setBroadcast(true);
 
             console.log("Discovery service started.");
+
+            console.log(
+                "Local IP addresses:",
+                this.getLocalIPAddresses()
+            );
+
+            console.log(
+                "Broadcast addresses:",
+                this.getBroadcastAddresses()
+            );
 
             // Start sending DISCOVER messages.
             this.startBroadcasting();
         });
     }
 
+
+    // =========================================================
+    // CHECK WHETHER AN INTERFACE IS VIRTUAL
+    // =========================================================
+
+    isVirtualInterface(interfaceName, address) {
+
+        const name = interfaceName.toLowerCase();
+
+        const virtualInterfaceNames = [
+            "virtualbox",
+            "vbox",
+            "vmware",
+            "hyper-v",
+            "hyperv",
+            "vethernet",
+            "wsl",
+            "docker",
+            "loopback"
+        ];
+
+        // Check interface name.
+        for (const virtualName of virtualInterfaceNames) {
+
+            if (name.includes(virtualName)) {
+                return true;
+            }
+        }
+
+
+        // VirtualBox default Host-Only network.
+        if (address && address.startsWith("192.168.56.")) {
+            return true;
+        }
+
+
+        // APIPA address.
+        // Usually means the interface does not have
+        // a proper LAN address.
+        if (address && address.startsWith("169.254.")) {
+            return true;
+        }
+
+
+        return false;
+    }
+
+
+    // =========================================================
+    // GET LOCAL IP ADDRESSES
+    // =========================================================
+
     getLocalIPAddresses() {
+
         const interfaces = os.networkInterfaces();
 
         const addresses = [];
 
-        for (const interfaceName of Object.keys(interfaces)) {
 
-            for (const networkInterface of interfaces[interfaceName]) {
+        for (const [interfaceName, networks] of Object.entries(interfaces)) {
+
+            for (const network of networks) {
 
                 if (
-                    networkInterface.family === "IPv4" &&
-                    !networkInterface.internal
+                    network.family === "IPv4" &&
+                    !network.internal &&
+                    !this.isVirtualInterface(
+                        interfaceName,
+                        network.address
+                    )
                 ) {
-                    addresses.push(networkInterface.address);
+
+                    addresses.push(network.address);
                 }
             }
         }
 
+
         return addresses;
     }
+
+
+    // =========================================================
+    // GET PRIMARY LOCAL IP ADDRESS
+    // =========================================================
+
+    getLocalIPAddress() {
+
+        const interfaces = os.networkInterfaces();
+
+
+        for (const [interfaceName, networks] of Object.entries(interfaces)) {
+
+            for (const network of networks) {
+
+                if (
+                    network.family === "IPv4" &&
+                    !network.internal &&
+                    !this.isVirtualInterface(
+                        interfaceName,
+                        network.address
+                    )
+                ) {
+
+                    return network.address;
+                }
+            }
+        }
+
+
+        return "unknown";
+    }
+
+
+    // =========================================================
+    // CALCULATE BROADCAST ADDRESS
+    // =========================================================
+    //
+    // Example:
+    //
+    // IP:
+    // 192.168.1.25
+    //
+    // Netmask:
+    // 255.255.255.0
+    //
+    // Result:
+    // 192.168.1.255
+    //
+    // =========================================================
+
+    calculateBroadcastAddress(ip, netmask) {
+
+        const ipParts = ip.split(".").map(Number);
+        const maskParts = netmask.split(".").map(Number);
+
+
+        const broadcastParts = ipParts.map((part, index) => {
+
+            return part | (~maskParts[index] & 255);
+
+        });
+
+
+        return broadcastParts.join(".");
+    }
+
+
+    // =========================================================
+    // GET BROADCAST ADDRESSES
+    // =========================================================
+
+    getBroadcastAddresses() {
+
+        const interfaces = os.networkInterfaces();
+
+        const broadcasts = [];
+
+
+        for (const [interfaceName, networks] of Object.entries(interfaces)) {
+
+            for (const network of networks) {
+
+                // Ignore:
+                // - IPv6
+                // - localhost
+                // - VirtualBox
+                // - VMware
+                // - Hyper-V
+                // - WSL
+                // - Docker
+                // - APIPA
+                if (
+                    network.family !== "IPv4" ||
+                    network.internal ||
+                    this.isVirtualInterface(
+                        interfaceName,
+                        network.address
+                    )
+                ) {
+                    continue;
+                }
+
+
+                // Some interfaces may not provide a netmask.
+                if (!network.netmask) {
+                    continue;
+                }
+
+
+                const broadcastAddress =
+                    this.calculateBroadcastAddress(
+                        network.address,
+                        network.netmask
+                    );
+
+
+                broadcasts.push(broadcastAddress);
+
+
+                console.log(
+                    `Network interface: ${interfaceName}`
+                );
+
+                console.log(
+                    `  IP: ${network.address}`
+                );
+
+                console.log(
+                    `  Netmask: ${network.netmask}`
+                );
+
+                console.log(
+                    `  Broadcast: ${broadcastAddress}`
+                );
+            }
+        }
+
+
+        // Remove duplicates.
+        const uniqueBroadcasts = [
+            ...new Set(broadcasts)
+        ];
+
+
+        // Fallback.
+        //
+        // Normally we should always have a real broadcast
+        // address. This is only here as a safety net.
+        if (uniqueBroadcasts.length === 0) {
+
+            console.warn(
+                "Could not determine LAN broadcast address."
+            );
+
+            return ["255.255.255.255"];
+        }
+
+
+        return uniqueBroadcasts;
+    }
+
+
+    // =========================================================
+    // START BROADCASTING
+    // =========================================================
 
     startBroadcasting() {
 
         // Send the first DISCOVER immediately.
         this.sendDiscover();
 
-        // Then send DISCOVER every 5 seconds.
-        setInterval(() => {
+
+        // Continue sending DISCOVER messages periodically.
+        this.broadcastInterval = setInterval(() => {
+
             this.sendDiscover();
+
         }, DISCOVERY_INTERVAL);
     }
 
+
+    // =========================================================
+    // SEND DISCOVER
+    // =========================================================
+
     sendDiscover() {
 
-        // The actual message we are broadcasting.
         const message = Buffer.from("DISCOVER");
 
-        this.socket.send(
-            message,
 
-            // UDP destination port
-            DISCOVERY_PORT,
+        // Get all valid LAN broadcast addresses.
+        //
+        // Example:
+        //
+        // [
+        //     "192.168.1.255"
+        // ]
+        //
+        const broadcastAddresses =
+            this.getBroadcastAddresses();
 
-            // Broadcast to all devices on the LAN
-            BROADCAST_ADDRESS,
 
-            (error) => {
-                if (error) {
-                    console.error(
-                        "Error sending DISCOVER:",
-                        error
-                    );
-                } else {
-                    console.log("Sent: DISCOVER");
-                }
-            }
+        console.log(
+            "Broadcasting DISCOVER to:",
+            broadcastAddresses
         );
+
+
+        for (const broadcastAddress of broadcastAddresses) {
+
+            this.socket.send(
+                message,
+                0,
+                message.length,
+                DISCOVERY_PORT,
+                broadcastAddress,
+                (error) => {
+
+                    if (error) {
+
+                        console.error(
+                            `Error sending DISCOVER to ${broadcastAddress}:`,
+                            error
+                        );
+
+                    } else {
+
+                        console.log(
+                            `Sent DISCOVER to ${broadcastAddress}`
+                        );
+                    }
+                }
+            );
+        }
     }
 
 
+    // =========================================================
+    // HANDLE RECEIVED MESSAGE
+    // =========================================================
+
     handleMessage(message, remoteInfo) {
 
-        // Ignore messages coming from this same laptop.
-        // Otherwise, our own broadcast will look like
-        // another device's DISCOVER message.
-        const localAddresses = this.getLocalIPAddresses();
+        // Get our own valid LAN IP addresses.
+        const localAddresses =
+            this.getLocalIPAddresses();
 
-        // Ignore packets sent by this same computer
+
+        // -----------------------------------------
+        // IGNORE OUR OWN PACKETS
+        // -----------------------------------------
+
         if (localAddresses.includes(remoteInfo.address)) {
+
             return;
         }
 
-        // Convert the received Buffer into normal text.
+
+        // Convert Buffer -> String.
         const messageText = message.toString();
+
 
         console.log(
             `Received "${messageText}" from ${remoteInfo.address}`
         );
 
-        // If another laptop is asking:
-        // "Are there any SyncLAN devices here?"
+
+        // -----------------------------------------
+        // DISCOVER REQUEST
+        // -----------------------------------------
+
         if (messageText === "DISCOVER") {
+
+            console.log(
+                `DISCOVER received from ${remoteInfo.address}`
+            );
+
+
+            // Send our information directly back
+            // to the device that sent DISCOVER.
             this.sendDiscoveryResponse(remoteInfo);
+
+
             return;
         }
 
-        // If we receive something other than DISCOVER,
-        // try to interpret it as JSON.
+
+        // -----------------------------------------
+        // DISCOVERY RESPONSE
+        // -----------------------------------------
+
         try {
+
             const data = JSON.parse(messageText);
 
-            // Check whether this is a discovery response.
+
             if (data.type === "DISCOVER_RESPONSE") {
-                this.handleDiscoveryResponse(data, remoteInfo);
+
+                this.handleDiscoveryResponse(
+                    data,
+                    remoteInfo
+                );
             }
+
         } catch (error) {
-            // The message wasn't valid JSON.
-            console.log("Received unknown message.");
+
+            console.log(
+                "Received unknown message."
+            );
         }
     }
 
+
+    // =========================================================
+    // SEND DISCOVERY RESPONSE
+    // =========================================================
+
     sendDiscoveryResponse(remoteInfo) {
 
-        // Information about this laptop.
         const response = {
 
             type: "DISCOVER_RESPONSE",
 
-            // Example:
-            // "DESKTOP-ABC123"
+            // Our computer's name.
             deviceName: this.deviceName,
 
-            // remoteInfo gives us information about
-            // the laptop that sent DISCOVER.
-            //
-            // But we need OUR IP address here.
+            // Our actual LAN IP.
             ip: this.getLocalIPAddress()
         };
 
 
-        // Convert JavaScript object → JSON string → Buffer
+        // JavaScript object
+        //       ↓
+        // JSON string
+        //       ↓
+        // Buffer
         const message = Buffer.from(
             JSON.stringify(response)
         );
 
 
-        // Send the response directly back to
-        // the laptop that sent DISCOVER.
+        console.log(
+            `Sending DISCOVER_RESPONSE to ${remoteInfo.address}`
+        );
+
+
         this.socket.send(
             message,
+            0,
+            message.length,
             DISCOVERY_PORT,
             remoteInfo.address,
             (error) => {
 
                 if (error) {
+
                     console.error(
-                        "Error sending response:",
+                        `Error sending response to ${remoteInfo.address}:`,
                         error
                     );
+
                 } else {
+
                     console.log(
                         `Sent DISCOVER_RESPONSE to ${remoteInfo.address}`
                     );
@@ -225,46 +552,81 @@ class DiscoveryService {
         );
     }
 
+
+    // =========================================================
+    // HANDLE DISCOVERY RESPONSE
+    // =========================================================
+
     handleDiscoveryResponse(data, remoteInfo) {
 
-    this.deviceRegistry.addOrUpdateDevice({
-        deviceName: data.deviceName,
-        ip: remoteInfo.address
-    });
+        // IMPORTANT:
+        //
+        // Use remoteInfo.address rather than data.ip
+        // because remoteInfo.address is the actual IP
+        // from which the UDP packet arrived.
+        //
+        this.deviceRegistry.addOrUpdateDevice({
 
-    console.log(
-        `Discovered device: ${data.deviceName} (${remoteInfo.address})`
-    );
+            deviceName: data.deviceName,
 
-    console.log("Active devices:");
-    console.table(this.deviceRegistry.getDevices());
-}
+            ip: remoteInfo.address
+        });
 
 
-    getLocalIPAddress() {
+        console.log(
+            `Discovered device: ${data.deviceName} (${remoteInfo.address})`
+        );
 
-        // Get all network interfaces of this laptop.
-        const interfaces = os.networkInterfaces();
 
-        // Check each network interface.
-        for (const interfaceName of Object.keys(interfaces)) {
-            for (const network of interfaces[interfaceName]) {
+        console.log("Active devices:");
 
-                // We only want:
-                // IPv4 addresses
-                // that are not localhost/internal addresses.
-                if (
-                    network.family === "IPv4" &&
-                    !network.internal
-                ) {
-                    return network.address;
-                }
-            }
+        console.table(
+            this.deviceRegistry.getDevices()
+        );
+    }
+
+
+    // =========================================================
+    // STOP DISCOVERY SERVICE
+    // =========================================================
+
+    stop() {
+
+        console.log("Stopping discovery service...");
+
+
+        if (this.broadcastInterval) {
+
+            clearInterval(
+                this.broadcastInterval
+            );
+
+            this.broadcastInterval = null;
         }
 
-        // If no suitable IP was found.
-        return "unknown";
+
+        if (this.cleanupInterval) {
+
+            clearInterval(
+                this.cleanupInterval
+            );
+
+            this.cleanupInterval = null;
+        }
+
+
+        if (this.socket) {
+
+            this.socket.close(() => {
+
+                console.log(
+                    "Discovery socket closed."
+                );
+
+            });
+        }
     }
 }
+
 
 module.exports = DiscoveryService;
