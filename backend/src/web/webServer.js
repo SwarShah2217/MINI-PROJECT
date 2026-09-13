@@ -315,11 +315,14 @@ class WebServer {
         ) {
             res.writeHead(200, { "Content-Type": "application/json" });
             const isPending = this.transferManager.pendingFile !== null;
-            const status = isPending ? this.transferManager.pendingFile.status : "idle";
             res.end(JSON.stringify({ 
                 isPending: isPending,
-                status: status
+                status: isPending ? this.transferManager.pendingFile.status : "idle",
+                // Add these two lines so the frontend has numbers to calculate:
+                sentBytes: isPending ? (this.transferManager.offset || 0) : 0,
+                totalBytes: isPending ? this.transferManager.pendingFile.fileSize : 0
             }));
+            
             return;
         }
 
@@ -482,24 +485,22 @@ class WebServer {
         }
 
         // Check outgoing file transfer status
-        if (
-            req.url === "/api/transfer/out-status" &&
-            req.method === "GET"
-        ) {
-            res.writeHead(200, { "Content-Type": "application/json" });
+        // if (
+        //     req.url === "/api/transfer/out-status" &&
+        //     req.method === "GET"
+        // ) {
+        //     res.writeHead(200, { "Content-Type": "application/json" });
+        //     const isPending = this.transferManager.pendingFile !== null;
+        //     res.end(JSON.stringify({ 
+        //         isPending: isPending,
+        //         status: isPending ? this.transferManager.pendingFile.status : "idle",
+        //         // Add these two lines so the frontend has numbers to calculate:
+        //         sentBytes: isPending ? (this.transferManager.offset || 0) : 0,
+        //         totalBytes: isPending ? this.transferManager.pendingFile.fileSize : 0
+        //     }));
             
-            const isPending = this.transferManager.pendingFile !== null;
-            
-            res.end(JSON.stringify({ 
-                isPending: isPending,
-                status: isPending ? this.transferManager.pendingFile.status : "idle",
-                // Add these two lines so the frontend has numbers to calculate:
-                sentBytes: isPending ? (this.transferManager.offset || 0) : 0,
-                totalBytes: isPending ? this.transferManager.pendingFile.fileSize : 0
-            }));
-            
-            return;
-        }
+        //     return;
+        // }
     }
 }
 
