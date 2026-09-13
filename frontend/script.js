@@ -107,7 +107,11 @@ async function loadConnectionStatus() {
             if (!fileInput.files.length) {
                 selectedFile.textContent = "No file selected.";
                 transferControls.classList.add("hidden");
-            } else if (selectedFile.textContent.includes("Waiting for approval...") || selectedFile.textContent.includes("Transfer accepted, sending...")) {
+            } else if (
+                selectedFile.textContent.includes("Waiting for approval...") || 
+                selectedFile.textContent.includes("Transfer accepted, sending...") ||
+                selectedFile.textContent.includes("Transfer paused")
+            ) {
                 const res = await fetch("/api/transfer/out-status");
                 const outStatus = await res.json();
                 
@@ -117,11 +121,14 @@ async function loadConnectionStatus() {
                 } else {
                     transferControls.classList.remove("hidden");
                     
-                    // Calculate and update progress
+                    // Format bytes into Megabytes to see instant, granular updates
+                    const sentMB = (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
+                    const totalMB = (outStatus.totalBytes / (1024 * 1024)).toFixed(2);
                     const percent = outStatus.totalBytes > 0 
                         ? Math.floor((outStatus.sentBytes / outStatus.totalBytes) * 100) 
                         : 0;
-                    progressText.textContent = `${percent}%`;
+                        
+                    progressText.textContent = `${sentMB} MB / ${totalMB} MB (${percent}%)`;
 
                     // Toggle Pause/Resume buttons based on status
                     if (outStatus.status === "transferring") {
