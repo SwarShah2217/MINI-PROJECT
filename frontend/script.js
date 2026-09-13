@@ -37,6 +37,11 @@ const acceptFileButton =
 const rejectFileButton =
     document.getElementById("rejectFileButton");
 
+const transferControls = document.getElementById("transferControls");
+const progressText = document.getElementById("progressText");
+const pauseButton = document.getElementById("pauseButton");
+const resumeButton = document.getElementById("resumeButton");
+
 // Current TCP connection state
 let currentConnectionStatus = {
     status: "disconnected",
@@ -100,15 +105,34 @@ async function loadConnectionStatus() {
             sendFileButton.disabled = false;
 
             if (!fileInput.files.length) {
-                selectedFile.textContent =
-                    "No file selected.";
+                selectedFile.textContent = "No file selected.";
+                transferControls.classList.add("hidden");
             } else if (selectedFile.textContent.includes("Waiting for approval...") || selectedFile.textContent.includes("Transfer accepted, sending...")) {
                 const res = await fetch("/api/transfer/out-status");
                 const outStatus = await res.json();
+                
                 if (!outStatus.isPending) {
                     selectedFile.textContent = "File transferred successfully.";
-                } else if (outStatus.status === "transferring" && !selectedFile.textContent.includes("Transfer accepted, sending...")) {
-                    selectedFile.textContent = "Transfer accepted, sending...";
+                    transferControls.classList.add("hidden");
+                } else {
+                    transferControls.classList.remove("hidden");
+                    
+                    // Calculate and update progress
+                    const percent = outStatus.totalBytes > 0 
+                        ? Math.floor((outStatus.sentBytes / outStatus.totalBytes) * 100) 
+                        : 0;
+                    progressText.textContent = `${percent}%`;
+
+                    // Toggle Pause/Resume buttons based on status
+                    if (outStatus.status === "transferring") {
+                        selectedFile.textContent = "Transfer accepted, sending...";
+                        pauseButton.classList.remove("hidden");
+                        resumeButton.classList.add("hidden");
+                    } else if (outStatus.status === "paused") {
+                        selectedFile.textContent = "Transfer paused.";
+                        pauseButton.classList.add("hidden");
+                        resumeButton.classList.remove("hidden");
+                    }
                 }
             }
 
@@ -550,3 +574,23 @@ setInterval(
 
 // Check immediately when page loads
 checkPendingFileRequest();
+
+// Pause the active transfer
+pauseButton.addEventListener("click", async () => {
+    try {
+        await fetch("/api/transfer/pause", { method: "POST" });
+        // The UI will update automatically on the next polling cycle
+    } catch (error) {
+        console.error("Failed to pause transfer:", error);
+    }
+});
+
+// Resume a paused transfer
+resumeButton.addEventListener("click", async () => {
+    try {
+        await fetch("/api/transfer/resume", { method: "POST" });
+        // The UI will update automatically on the next polling cycle
+    } catch (error) {
+        console.error("Failed to resume transfer:", error);
+    }
+});

@@ -464,6 +464,37 @@ class WebServer {
 
             res.end(data);
         });
+
+        // Pause active transfer
+        if (req.url === "/api/transfer/pause" && req.method === "POST") {
+            const success = this.transferManager.pauseTransfer();
+            res.writeHead(success ? 200 : 400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success }));
+            return;
+        }
+
+        // Resume active transfer
+        if (req.url === "/api/transfer/resume" && req.method === "POST") {
+            const success = this.transferManager.resumeTransfer();
+            res.writeHead(success ? 200 : 400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success }));
+            return;
+        }
+
+        // Get outgoing transfer status with sent and total bytes
+        if (req.url === "/api/transfer/out-status" && req.method === "GET") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            
+            const isPending = this.transferManager.pendingFile !== null;
+            
+            res.end(JSON.stringify({ 
+                isPending: isPending,
+                status: isPending ? this.transferManager.pendingFile.status : "idle",
+                sentBytes: isPending ? (this.transferManager.offset || 0) : 0,
+                totalBytes: isPending ? this.transferManager.pendingFile.fileSize : 0
+            }));
+            return;
+        }
     }
 }
 
