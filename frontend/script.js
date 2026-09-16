@@ -107,56 +107,61 @@ async function loadConnectionStatus() {
             fileInput.disabled = false;
             sendFileButton.disabled = false;
 
-            if (!fileInput.files.length) {
-                selectedFile.textContent = "No file selected.";
-                transferControls.classList.add("hidden");
-            } else if (
-                selectedFile.textContent.includes("Waiting for approval") || 
-                selectedFile.textContent.includes("Transferring") ||
-                selectedFile.textContent.includes("Paused") ||
-                selectedFile.textContent.includes("Queuing") ||
-                selectedFile.textContent.includes("more in queue")
-            ) {
-                const res = await fetch("/api/transfer/out-status");
-                const outStatus = await res.json();
-                
-                if (!outStatus.isPending) {
-                    if (isCancelled) {
-                        selectedFile.textContent = "Transfer cancelled.";
-                        isCancelled = false;
-                    } else if (outStatus.queueLength === 0) {
-                        selectedFile.textContent = "All files transferred successfully.";
-                    }
-                    transferControls.classList.add("hidden");
-                } else {
-                    // Show controls for any active state (queued, transferring, paused)
-                    transferControls.classList.remove("hidden");
-                    
-                    // Format bytes into Megabytes to see instant, granular updates
-                    const sentMB = (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
-                    const totalMB = (outStatus.totalBytes / (1024 * 1024)).toFixed(2);
-                    const percent = outStatus.totalBytes > 0 
-                        ? Math.floor((outStatus.sentBytes / outStatus.totalBytes) * 100) 
-                        : 0;
-                        
-                    progressText.textContent = `${sentMB} MB / ${totalMB} MB (${percent}%)`;
-                    
-                    let queueText = outStatus.queueLength > 0 ? ` (${outStatus.queueLength} more in queue)` : "";
+            // Always check backend for active transfer status
+            const res = await fetch("/api/transfer/out-status");
+            const outStatus = await res.json();
 
-                    // Toggle Pause/Resume buttons based on status
-                    if (outStatus.status === "transferring") {
-                        selectedFile.textContent = `Transferring: ${outStatus.fileName}${queueText}`;
-                        pauseButton.classList.remove("hidden");
-                        resumeButton.classList.add("hidden");
-                        cancelButton.classList.remove("hidden");
-                    } else if (outStatus.status === "paused") {
-                        selectedFile.textContent = `Paused: ${outStatus.fileName}${queueText}`;
-                        pauseButton.classList.add("hidden");
-                        resumeButton.classList.remove("hidden");
-                        cancelButton.classList.remove("hidden");
-                    } else if (outStatus.status === "pending") {
-                        selectedFile.textContent = `Waiting for approval: ${outStatus.fileName}${queueText}`;
-                    }
+            if (outStatus.isPending) {
+                // Active transfer — show controls and progress
+                transferControls.classList.remove("hidden");
+
+                const sentMB = (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
+                const totalMB = (outStatus.totalBytes / (1024 * 1024)).toFixed(2);
+                const percent = outStatus.totalBytes > 0
+                    ? Math.floor((outStatus.sentBytes / outStatus.totalBytes) * 100)
+                    : 0;
+                progressText.textContent = `${sentMB} MB / ${totalMB} MB (${percent}%)`;
+
+                const queueText = outStatus.queueLength > 0 ? ` (${outStatus.queueLength} more in queue)` : "";
+
+                if (outStatus.status === "transferring") {
+                    selectedFile.textContent = `Transferring: ${outStatus.fileName}${queueText}`;
+                    pauseButton.classList.remove("hidden");
+                    resumeButton.classList.add("hidden");
+                    cancelButton.classList.remove("hidden");
+                } else if (outStatus.status === "paused") {
+                    selectedFile.textContent = `Paused: ${outStatus.fileName}${queueText}`;
+                    pauseButton.classList.add("hidden");
+                    resumeButton.classList.remove("hidden");
+                    cancelButton.classList.remove("hidden");
+                } else if (outStatus.status === "pending") {
+                    selectedFile.textContent = `Waiting for approval: ${outStatus.fileName}${queueText}`;
+                    pauseButton.classList.add("hidden");
+                    resumeButton.classList.add("hidden");
+                    cancelButton.classList.add("hidden");
+                } else if (outStatus.status === "queued") {
+                    selectedFile.textContent = `Queued: ${outStatus.fileName}${queueText}`;
+                    pauseButton.classList.add("hidden");
+                    resumeButton.classList.add("hidden");
+                    cancelButton.classList.remove("hidden");
+                }
+            } else if (outStatus.queueLength > 0) {
+                // Queue has items but nothing active yet
+                selectedFile.textContent = `${outStatus.queueLength} file(s) queued...`;
+                transferControls.classList.add("hidden");
+            } else {
+                // No active transfer, no queue
+                transferControls.classList.add("hidden");
+                if (isCancelled) {
+                    selectedFile.textContent = "Transfer cancelled.";
+                    isCancelled = false;
+                } else if (selectedFile.textContent.includes("Transferring") ||
+                           selectedFile.textContent.includes("Paused") ||
+                           selectedFile.textContent.includes("Waiting for approval") ||
+                           selectedFile.textContent.includes("Queued")) {
+                    selectedFile.textContent = "All files transferred successfully.";
+                } else if (!fileInput.files.length) {
+                    selectedFile.textContent = "No file selected.";
                 }
             }
 
