@@ -129,11 +129,8 @@ async function loadConnectionStatus() {
                     }
                     transferControls.classList.add("hidden");
                 } else {
-                    if (outStatus.status !== "pending") {
-                        transferControls.classList.remove("hidden");
-                    } else {
-                        transferControls.classList.add("hidden");
-                    }
+                    // Show controls for any active state (queued, transferring, paused)
+                    transferControls.classList.remove("hidden");
                     
                     // Format bytes into Megabytes to see instant, granular updates
                     const sentMB = (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
