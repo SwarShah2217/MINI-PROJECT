@@ -3,7 +3,7 @@ const path = require("path");
 
 class FileReceiver {
 
-    receiveFile(socket, fileName, fileSize, initialData) {
+    receiveFile(socket, fileName, fileSize, transferId, initialData) {
 
         const downloadsDirectory = path.join(
             __dirname,
@@ -20,9 +20,11 @@ class FileReceiver {
         // Prevent the incoming file name from containing a path
         fileName = path.basename(fileName);
 
+        const safeFileName = transferId ? `${transferId}-${fileName}` : fileName;
+
         const filePath = path.join(
             downloadsDirectory,
-            fileName
+            safeFileName
         );
 
         const writeStream =
@@ -72,18 +74,20 @@ class FileReceiver {
             writeStream.end();
         }
 
-        socket.on("end", () => {
-
-            // Connection closed before expected file size
+        const handleIncomplete = () => {
             if (!transferCompleted) {
-
-                console.error(
-                    `File transfer ended early: ${receivedBytes}/${fileSize} bytes`
-                );
-
-                writeStream.end();
+                transferCompleted = true; // prevent multiple triggers
+                console.error(`File transfer ended early: ${receivedBytes}/${fileSize} bytes`);
+                writeStream.close(() => {
+                    fs.unlink(filePath, (err) => {
+                        if (!err) console.log(`Deleted partially downloaded file: ${filePath}`);
+                    });
+                });
             }
-        });
+        };
+
+        socket.on("end", handleIncomplete);
+        socket.on("close", handleIncomplete);
 
         writeStream.on("finish", () => {
 
@@ -126,6 +130,7 @@ class FileReceiver {
                 "File receiver socket error:",
                 error.message
             );
+            handleIncomplete();
         });
     }
 }

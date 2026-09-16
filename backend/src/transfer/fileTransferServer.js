@@ -70,6 +70,7 @@ class FileTransferServer {
                             socket,
                             header.fileName,
                             header.fileSize,
+                            header.transferId,
                             remainingData
                         );
 

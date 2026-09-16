@@ -12,12 +12,13 @@ class TransferManager {
         // Shared connection state gives access to the active TCP socket
         this.connectionState = connectionState;
 
-        // Stores information about the file waiting to be transferred  
-        this.pendingFile = null;
+        // Stores a queue of files waiting to be transferred
+        this.transferQueue = [];
+        this.activeTransfer = null;
     }
 
     // Send file metadata to the connected peer
-    sendTransferRequest(fileName, fileSize) {
+    sendTransferRequest(fileName, fileSize, transferId) {
 
         // File request can only be sent after connection is established
         if (this.connectionState.status !== "connected") {
@@ -31,10 +32,11 @@ class TransferManager {
         }
 
         // Location of the file temporarily uploaded by the browser
+        const tempFileName = `${transferId}-${fileName}`;
         const filePath = path.join(
             __dirname,
             "../../temp",
-            fileName
+            tempFileName
         );
 
         // Make sure the file actually exists
@@ -47,27 +49,50 @@ class TransferManager {
             return false;
         }
 
-        // Remember the file for when the receiver accepts it
-        this.pendingFile = {
+        // Add the file to the queue
+        this.transferQueue.push({
             fileName: fileName,
             fileSize: fileSize,
+            transferId: transferId,
             filePath: filePath,
-            status: "pending"
-        };
+            status: "queued"
+        });
+
+        // Trigger processing if idle
+        if (!this.activeTransfer) {
+            this.processQueue();
+        }
+
+        console.log(
+            `File added to transfer queue: ${fileName} (${fileSize} bytes)`
+        );
+
+        return true;
+    }
+
+    // Process the next file in the queue
+    processQueue() {
+        if (this.activeTransfer || this.transferQueue.length === 0) {
+            return;
+        }
+
+        const socket = this.connectionState.socket;
+        if (!socket || this.connectionState.status !== "connected") {
+            return;
+        }
+
+        this.activeTransfer = this.transferQueue.shift();
+        this.activeTransfer.status = "pending";
 
         const request = {
             type: "FILE_TRANSFER_REQUEST",
-            fileName: fileName,
-            fileSize: fileSize
+            fileName: this.activeTransfer.fileName,
+            fileSize: this.activeTransfer.fileSize,
+            transferId: this.activeTransfer.transferId
         };
 
         socket.write(JSON.stringify(request));
 
-        console.log(
-            `File transfer request sent: ${fileName} (${fileSize} bytes)`
-        );
-
-        return true;
     }
 
     connectForFileTransfer(peerIp) {
@@ -137,9 +162,9 @@ class TransferManager {
     }
 
     sendFile(fileSocket) {
-        if (!this.pendingFile) return;
+        if (!this.activeTransfer) return;
 
-        this.pendingFile.status = "transferring";
+        this.activeTransfer.status = "transferring";
         this.fileSocket = fileSocket;
         this.isPaused = false;
         
@@ -147,19 +172,20 @@ class TransferManager {
         this.offset = 0;
         this.chunkSize = 64 * 1024; // Send in 64 KB chunks
 
-        console.log(`Starting file transfer: ${this.pendingFile.fileName}`);
+        console.log(`Starting file transfer: ${this.activeTransfer.fileName}`);
 
         // Send file metadata header first
         const header = JSON.stringify({
-            fileName: this.pendingFile.fileName,
-            fileSize: this.pendingFile.fileSize
+            fileName: this.activeTransfer.fileName,
+            fileSize: this.activeTransfer.fileSize,
+            transferId: this.activeTransfer.transferId
         }) + "\n";
 
         fileSocket.write(header);
         console.log("File transfer header sent");
 
         // Open the file manually rather than piping it
-        fs.open(this.pendingFile.filePath, 'r', (error, fd) => {
+        fs.open(this.activeTransfer.filePath, 'r', (error, fd) => {
             if (error) {
                 console.error("Error opening file:", error.message);
                 fileSocket.destroy();
@@ -214,7 +240,7 @@ class TransferManager {
     pauseTransfer() {
         if (!this.isPaused && this.fileSocket) {
             this.isPaused = true;
-            this.pendingFile.status = "paused";
+            this.activeTransfer.status = "paused";
             console.log("Transfer paused at offset:", this.offset);
             return true;
         }
@@ -224,7 +250,7 @@ class TransferManager {
     resumeTransfer() {
         if (this.isPaused && this.fileSocket) {
             this.isPaused = false;
-            this.pendingFile.status = "transferring";
+            this.activeTransfer.status = "transferring";
             console.log("Transfer resumed from offset:", this.offset);
             
             // Kickstart the loop again
@@ -234,14 +260,25 @@ class TransferManager {
         return false;
     }
 
+    cancelTransfer() {
+        if (this.fileSocket) {
+            this.isPaused = true;
+            this.fileSocket.destroy();
+            console.log("Transfer cancelled by sender.");
+            this.cleanupTemporaryFile();
+            return true;
+        }
+        return false;
+    }
+
     cleanupTemporaryFile() {
 
-        if (!this.pendingFile) {
+        if (!this.activeTransfer) {
             return;
         }
 
         fs.unlink(
-            this.pendingFile.filePath,
+            this.activeTransfer.filePath,
             (error) => {
 
                 if (error) {
@@ -255,10 +292,13 @@ class TransferManager {
                 }
 
                 console.log(
-                    `Temporary file deleted: ${this.pendingFile.filePath}`
+                    `Temporary file deleted: ${this.activeTransfer.filePath}`
                 );
 
-                this.pendingFile = null;
+                this.activeTransfer = null;
+                
+                // Process the next file in the queue, if any
+                this.processQueue();
             }
         );
     }

@@ -41,6 +41,9 @@ const transferControls = document.getElementById("transferControls");
 const progressText = document.getElementById("progressText");
 const pauseButton = document.getElementById("pauseButton");
 const resumeButton = document.getElementById("resumeButton");
+const cancelButton = document.getElementById("cancelButton");
+
+let isCancelled = false;
 
 // Current TCP connection state
 let currentConnectionStatus = {
@@ -108,18 +111,29 @@ async function loadConnectionStatus() {
                 selectedFile.textContent = "No file selected.";
                 transferControls.classList.add("hidden");
             } else if (
-                selectedFile.textContent.includes("Waiting for approval...") || 
-                selectedFile.textContent.includes("Transfer accepted, sending...") ||
-                selectedFile.textContent.includes("Transfer paused")
+                selectedFile.textContent.includes("Waiting for approval") || 
+                selectedFile.textContent.includes("Transferring") ||
+                selectedFile.textContent.includes("Paused") ||
+                selectedFile.textContent.includes("Queuing") ||
+                selectedFile.textContent.includes("more in queue")
             ) {
                 const res = await fetch("/api/transfer/out-status");
                 const outStatus = await res.json();
                 
                 if (!outStatus.isPending) {
-                    selectedFile.textContent = "File transferred successfully.";
+                    if (isCancelled) {
+                        selectedFile.textContent = "Transfer cancelled.";
+                        isCancelled = false;
+                    } else if (outStatus.queueLength === 0) {
+                        selectedFile.textContent = "All files transferred successfully.";
+                    }
                     transferControls.classList.add("hidden");
                 } else {
-                    transferControls.classList.remove("hidden");
+                    if (outStatus.status !== "pending") {
+                        transferControls.classList.remove("hidden");
+                    } else {
+                        transferControls.classList.add("hidden");
+                    }
                     
                     // Format bytes into Megabytes to see instant, granular updates
                     const sentMB = (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
@@ -129,16 +143,22 @@ async function loadConnectionStatus() {
                         : 0;
                         
                     progressText.textContent = `${sentMB} MB / ${totalMB} MB (${percent}%)`;
+                    
+                    let queueText = outStatus.queueLength > 0 ? ` (${outStatus.queueLength} more in queue)` : "";
 
                     // Toggle Pause/Resume buttons based on status
                     if (outStatus.status === "transferring") {
-                        selectedFile.textContent = "Transfer accepted, sending...";
+                        selectedFile.textContent = `Transferring: ${outStatus.fileName}${queueText}`;
                         pauseButton.classList.remove("hidden");
                         resumeButton.classList.add("hidden");
+                        cancelButton.classList.remove("hidden");
                     } else if (outStatus.status === "paused") {
-                        selectedFile.textContent = "Transfer paused.";
+                        selectedFile.textContent = `Paused: ${outStatus.fileName}${queueText}`;
                         pauseButton.classList.add("hidden");
                         resumeButton.classList.remove("hidden");
+                        cancelButton.classList.remove("hidden");
+                    } else if (outStatus.status === "pending") {
+                        selectedFile.textContent = `Waiting for approval: ${outStatus.fileName}${queueText}`;
                     }
                 }
             }
@@ -355,125 +375,69 @@ async function checkPendingFileRequest() {
 
 // Display selected file information
 fileInput.addEventListener("change", () => {
+    const files = fileInput.files;
 
-    const file =
-        fileInput.files[0];
-
-
-    if (file) {
-
-        selectedFile.textContent =
-            `${file.name} (${file.size} bytes)`;
-
+    if (files.length === 1) {
+        selectedFile.textContent = `${files[0].name} (${files[0].size} bytes)`;
+    } else if (files.length > 1) {
+        selectedFile.textContent = `${files.length} files selected.`;
     } else {
-
-        selectedFile.textContent =
-            "No file selected.";
+        selectedFile.textContent = "No file selected.";
     }
 });
 
-// Upload the selected file to the local Node.js backend
+// Upload the selected files to the local Node.js backend
 sendFileButton.addEventListener("click", async () => {
+    const files = Array.from(fileInput.files);
 
-    const file = fileInput.files[0];
-
-    if (!file) {
-        selectedFile.textContent =
-            "Please select a file first.";
+    if (files.length === 0) {
+        selectedFile.textContent = "Please select a file first.";
         return;
     }
 
-    try {
+    sendFileButton.disabled = true;
+    fileInput.disabled = true;
 
-        selectedFile.textContent =
-            `Uploading ${file.name}...`;
+    selectedFile.textContent = `Queuing ${files.length} file(s)...`;
 
-        const response = await fetch(
-            "/api/transfer/upload",
-            {
+    for (const file of files) {
+        try {
+            const response = await fetch("/api/transfer/upload", {
                 method: "POST",
-
-                headers: {
-                    "X-File-Name": file.name
-                },
-
+                headers: { "X-File-Name": file.name },
                 body: file
+            });
+
+            const result = await response.json();
+            if (!result.success) {
+                console.error(`File upload failed for ${file.name}`);
+                continue;
             }
-        );
 
-        const result =
-            await response.json();
+            const transferId = result.transferId;
 
-        if (!result.success) {
-
-            selectedFile.textContent =
-                "File upload failed.";
-
-            return;
-        }
-
-        selectedFile.textContent =
-            `${file.name} uploaded. Sending transfer request...`;
-
-        console.log(
-            "File uploaded successfully:",
-            result
-        );
-
-
-        // Tell the backend to send the file transfer request
-        const transferResponse = await fetch(
-            "/api/transfer/request",
-            {
+            const transferResponse = await fetch("/api/transfer/request", {
                 method: "POST",
-
-                headers: {
-                    "Content-Type": "application/json"
-                },
-
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     fileName: file.name,
-                    fileSize: file.size
+                    fileSize: file.size,
+                    transferId: transferId
                 })
+            });
+
+            const transferResult = await transferResponse.json();
+            if (!transferResult.success) {
+                console.error(`Transfer request failed for ${file.name}`);
             }
-        );
 
-        const transferResult =
-            await transferResponse.json();
-
-
-        if (!transferResult.success) {
-
-            selectedFile.textContent =
-                "Could not send file transfer request.";
-
-            console.error(
-                "Transfer request failed:",
-                transferResult
-            );
-
-            return;
+        } catch (error) {
+            console.error(`Error uploading ${file.name}:`, error);
         }
-
-
-        selectedFile.textContent =
-            `${file.name} transfer request sent. Waiting for approval...`;
-
-        console.log(
-            "Transfer request sent successfully:",
-            transferResult
-        );
-
-    } catch (error) {
-
-        console.error(
-            "File upload error:",
-            error
-        );
-
-        selectedFile.textContent =
-            "File upload failed.";
     }
+    
+    // Clear input so user can't click send again with same files immediately
+    fileInput.value = ""; 
 });
 
 
@@ -599,5 +563,15 @@ resumeButton.addEventListener("click", async () => {
         // The UI will update automatically on the next polling cycle
     } catch (error) {
         console.error("Failed to resume transfer:", error);
+    }
+});
+
+// Cancel an active transfer
+cancelButton.addEventListener("click", async () => {
+    try {
+        isCancelled = true;
+        await fetch("/api/transfer/cancel", { method: "POST" });
+    } catch (error) {
+        console.error("Failed to cancel transfer:", error);
     }
 });

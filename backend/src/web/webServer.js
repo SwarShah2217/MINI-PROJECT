@@ -1,7 +1,7 @@
-// Built-in Node.js modules for the local web server and frontend files
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 
 class WebServer {
@@ -190,7 +190,8 @@ class WebServer {
                     const success =
                         this.transferManager.sendTransferRequest(
                             data.fileName,
-                            data.fileSize
+                            data.fileSize,
+                            data.transferId
                         );
 
                     res.writeHead(
@@ -260,9 +261,12 @@ class WebServer {
             // Prevent a browser-supplied path from escaping temp/
             fileName = path.basename(fileName);
 
+            const transferId = crypto.randomUUID();
+            const tempFileName = `${transferId}-${fileName}`;
+
             const filePath = path.join(
                 tempDirectory,
-                fileName
+                tempFileName
             );
 
             const writeStream =
@@ -283,6 +287,7 @@ class WebServer {
                 res.end(JSON.stringify({
                     success: true,
                     fileName: fileName,
+                    transferId: transferId,
                     filePath: filePath
                 }));
             });
@@ -314,13 +319,14 @@ class WebServer {
             req.method === "GET"
         ) {
             res.writeHead(200, { "Content-Type": "application/json" });
-            const isPending = this.transferManager.pendingFile !== null;
+            const isPending = this.transferManager.activeTransfer !== null;
             res.end(JSON.stringify({ 
                 isPending: isPending,
-                status: isPending ? this.transferManager.pendingFile.status : "idle",
-                // Add these two lines so the frontend has numbers to calculate:
+                status: isPending ? this.transferManager.activeTransfer.status : "idle",
+                fileName: isPending ? this.transferManager.activeTransfer.fileName : null,
                 sentBytes: isPending ? (this.transferManager.offset || 0) : 0,
-                totalBytes: isPending ? this.transferManager.pendingFile.fileSize : 0
+                totalBytes: isPending ? this.transferManager.activeTransfer.fileSize : 0,
+                queueLength: this.transferManager.transferQueue.length
             }));
             
             return;
@@ -408,6 +414,14 @@ class WebServer {
         // Resume active transfer
         if (req.url === "/api/transfer/resume" && req.method === "POST") {
             const success = this.transferManager.resumeTransfer();
+            res.writeHead(success ? 200 : 400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success }));
+            return;
+        }
+
+        // Cancel active transfer
+        if (req.url === "/api/transfer/cancel" && req.method === "POST") {
+            const success = this.transferManager.cancelTransfer();
             res.writeHead(success ? 200 : 400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success }));
             return;
