@@ -45,12 +45,23 @@
 
         <!-- Add this inside the .file-section div -->
         <div id="transferControls" class="hidden">
-            <p>Transfer Progress: <span id="progressText">0%</span></p>
-            <button id="pauseButton">Pause</button>
-            <button id="resumeButton" class="hidden">Resume</button>
-            <button id="cancelButton" class="hidden">Cancel</button>
+
+            <p id="transferFileName">Preparing transfer...</p>
+
+            <div class="progress-container">
+                <div id="progressBar" class="progress-bar"></div>
+            </div>
+
+            <p id="progressText">0%</p>
+
+            <div class="transfer-buttons">
+                <button id="pauseButton">Pause</button>
+                <button id="resumeButton" class="hidden">Resume</button>
+                <button id="cancelButton">Cancel</button>
+            </div>
+
         </div>
-        
+
     </div>
 
 
