@@ -37,11 +37,26 @@ const acceptFileButton =
 const rejectFileButton =
     document.getElementById("rejectFileButton");
 
-const transferControls = document.getElementById("transferControls");
-const progressText = document.getElementById("progressText");
-const pauseButton = document.getElementById("pauseButton");
-const resumeButton = document.getElementById("resumeButton");
-const cancelButton = document.getElementById("cancelButton");
+const transferControls =
+    document.getElementById("transferControls");
+
+const transferFileName =
+    document.getElementById("transferFileName");
+
+const progressBar =
+    document.getElementById("progressBar");
+
+const progressText =
+    document.getElementById("progressText");
+
+const pauseButton =
+    document.getElementById("pauseButton");
+
+const resumeButton =
+    document.getElementById("resumeButton");
+
+const cancelButton =
+    document.getElementById("cancelButton");
 
 let isCancelled = false;
 
@@ -112,57 +127,79 @@ async function loadConnectionStatus() {
             const outStatus = await res.json();
 
             if (outStatus.isPending) {
-                // Active transfer — show controls and progress
+
                 transferControls.classList.remove("hidden");
 
-                const sentMB = (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
-                const totalMB = (outStatus.totalBytes / (1024 * 1024)).toFixed(2);
-                const percent = outStatus.totalBytes > 0
-                    ? Math.floor((outStatus.sentBytes / outStatus.totalBytes) * 100)
-                    : 0;
-                progressText.textContent = `${sentMB} MB / ${totalMB} MB (${percent}%)`;
+                transferFileName.textContent =
+                    `${outStatus.status === "paused" ? "Paused" : "Transferring"}: ${outStatus.fileName}`;
 
-                const queueText = outStatus.queueLength > 0 ? ` (${outStatus.queueLength} more in queue)` : "";
+                const sentMB =
+                    (outStatus.sentBytes / (1024 * 1024)).toFixed(2);
+
+                const totalMB =
+                    (outStatus.totalBytes / (1024 * 1024)).toFixed(2);
+
+                const percent =
+                    outStatus.totalBytes > 0
+                        ? Math.min(
+                            100,
+                            Math.floor(
+                                (outStatus.sentBytes /
+                                    outStatus.totalBytes) * 100
+                            )
+                        )
+                        : 0;
+
+                progressBar.style.width = `${percent}%`;
+
+                progressText.textContent =
+                    `${sentMB} MB / ${totalMB} MB (${percent}%)`;
+
 
                 if (outStatus.status === "transferring") {
-                    selectedFile.textContent = `Transferring: ${outStatus.fileName}${queueText}`;
+
                     pauseButton.classList.remove("hidden");
                     resumeButton.classList.add("hidden");
                     cancelButton.classList.remove("hidden");
-                } else if (outStatus.status === "paused") {
-                    selectedFile.textContent = `Paused: ${outStatus.fileName}${queueText}`;
+
+                }
+
+                else if (outStatus.status === "paused") {
+
                     pauseButton.classList.add("hidden");
                     resumeButton.classList.remove("hidden");
                     cancelButton.classList.remove("hidden");
-                } else if (outStatus.status === "pending") {
-                    selectedFile.textContent = `Waiting for approval: ${outStatus.fileName}${queueText}`;
+
+                }
+
+                else if (outStatus.status === "pending") {
+
+                    transferFileName.textContent =
+                        `Waiting for approval: ${outStatus.fileName}`;
+
                     pauseButton.classList.add("hidden");
                     resumeButton.classList.add("hidden");
-                    cancelButton.classList.add("hidden");
-                } else if (outStatus.status === "queued") {
-                    selectedFile.textContent = `Queued: ${outStatus.fileName}${queueText}`;
+                    cancelButton.classList.remove("hidden");
+
+                }
+
+                else if (outStatus.status === "queued") {
+
+                    transferFileName.textContent =
+                        `Queued: ${outStatus.fileName}`;
+
                     pauseButton.classList.add("hidden");
                     resumeButton.classList.add("hidden");
                     cancelButton.classList.remove("hidden");
                 }
-            } else if (outStatus.queueLength > 0) {
-                // Queue has items but nothing active yet
-                selectedFile.textContent = `${outStatus.queueLength} file(s) queued...`;
+
+            }
+            else {
+
                 transferControls.classList.add("hidden");
-            } else {
-                // No active transfer, no queue
-                transferControls.classList.add("hidden");
-                if (isCancelled) {
-                    selectedFile.textContent = "Transfer cancelled.";
-                    isCancelled = false;
-                } else if (selectedFile.textContent.includes("Transferring") ||
-                           selectedFile.textContent.includes("Paused") ||
-                           selectedFile.textContent.includes("Waiting for approval") ||
-                           selectedFile.textContent.includes("Queued")) {
-                    selectedFile.textContent = "All files transferred successfully.";
-                } else if (!fileInput.files.length) {
-                    selectedFile.textContent = "No file selected.";
-                }
+
+                progressBar.style.width = "0%";
+                progressText.textContent = "0%";
             }
 
         }
@@ -402,6 +439,18 @@ sendFileButton.addEventListener("click", async () => {
 
     selectedFile.textContent = `Queuing ${files.length} file(s)...`;
 
+    transferControls.classList.remove("hidden");
+
+    transferFileName.textContent =
+        `Preparing ${files.length} file(s)...`;
+
+    progressBar.style.width = "0%";
+    progressText.textContent = "Preparing...";
+
+    pauseButton.classList.add("hidden");
+    resumeButton.classList.add("hidden");
+    cancelButton.classList.add("hidden");
+
     for (const file of files) {
         try {
             const response = await fetch("/api/transfer/upload", {
@@ -437,9 +486,9 @@ sendFileButton.addEventListener("click", async () => {
             console.error(`Error uploading ${file.name}:`, error);
         }
     }
-    
+
     // Clear input so user can't click send again with same files immediately
-    fileInput.value = ""; 
+    fileInput.value = "";
 });
 
 
