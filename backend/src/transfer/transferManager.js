@@ -316,6 +316,8 @@ socket.on("data", (data) => {
                         dataToSend
                     );
 
+
+
                 const frame =
                     ChunkProtocol.createChunkFrame(
                         this.chunkNumber,
