@@ -182,9 +182,12 @@ socket.on("data", (data) => {
                 `NACK received for chunk ${message.chunkNumber}`
             );
 
+            this.resendChunk(
+                message.chunkNumber
+            );
+
             continue;
         }
-
 
         if (
             message.type ===
@@ -262,90 +265,183 @@ socket.on("data", (data) => {
 
     sendNextChunk() {
 
-    if (this.isPaused || !this.fileSocket) {
-        return;
-    }
+        if (this.isPaused || !this.fileSocket) {
+            return;
+        }
 
-    const buffer =
-        Buffer.alloc(this.chunkSize);
+        const buffer =
+            Buffer.alloc(this.chunkSize);
 
-    fs.read(
-        this.fileDescriptor,
-        buffer,
-        0,
-        this.chunkSize,
-        this.offset,
-        (error, bytesRead) => {
+        fs.read(
+            this.fileDescriptor,
+            buffer,
+            0,
+            this.chunkSize,
+            this.offset,
+            (error, bytesRead) => {
 
-            if (error) {
+                if (error) {
 
-                console.error(
-                    "Error reading file chunk:",
-                    error.message
-                );
+                    console.error(
+                        "Error reading file chunk:",
+                        error.message
+                    );
 
-                this.fileSocket.destroy();
-                return;
-            }
+                    this.fileSocket.destroy();
+                    return;
+                }
 
-            if (bytesRead === 0) {
+                if (bytesRead === 0) {
+
+                    console.log(
+                        "All chunks sent. Waiting for receiver confirmation..."
+                    );
+
+                    fs.close(
+                        this.fileDescriptor,
+                        () => {}
+                    );
+
+                    return;
+                }
+
+                const dataToSend =
+                    buffer.subarray(
+                        0,
+                        bytesRead
+                    );
+
+                const chunkHash =
+                    HashService.hashBuffer(
+                        dataToSend
+                    );
+
+                const frame =
+                    ChunkProtocol.createChunkFrame(
+                        this.chunkNumber,
+                        dataToSend,
+                        chunkHash
+                    );
 
                 console.log(
-                    "All chunks sent. Waiting for receiver confirmation..."
+                    `Sending chunk ${this.chunkNumber} | ${bytesRead} bytes | SHA-256: ${chunkHash}`
                 );
 
-                fs.close(
-                    this.fileDescriptor,
-                    () => {}
-                );
+                this.offset += bytesRead;
+                this.chunkNumber++;
 
-                return;
+                const canWriteMore =
+                    this.fileSocket.write(frame);
+
+                if (canWriteMore) {
+
+                    this.sendNextChunk();
+
+                } else {
+
+                    this.fileSocket.once(
+                        "drain",
+                        () => {
+                            this.sendNextChunk();
+                        }
+                    );
+                }
             }
+        );
+    }    
 
-            const dataToSend =
-                buffer.subarray(
+    resendChunk(chunkNumber) {
+
+        if (
+            !this.activeTransfer ||
+            !this.fileSocket
+        ) {
+            return;
+        }
+
+        const chunkOffset =
+            chunkNumber * this.chunkSize;
+
+        const buffer =
+            Buffer.alloc(this.chunkSize);
+
+        fs.open(
+            this.activeTransfer.filePath,
+            "r",
+            (openError, fd) => {
+
+                if (openError) {
+
+                    console.error(
+                        `Could not reopen file for chunk ${chunkNumber}:`,
+                        openError.message
+                    );
+
+                    return;
+                }
+
+                fs.read(
+                    fd,
+                    buffer,
                     0,
-                    bytesRead
-                );
+                    this.chunkSize,
+                    chunkOffset,
+                    (readError, bytesRead) => {
 
-            const chunkHash =
-                HashService.hashBuffer(
-                    dataToSend
-                );
+                        fs.close(
+                            fd,
+                            () => {}
+                        );
 
-            const frame =
-                ChunkProtocol.createChunkFrame(
-                    this.chunkNumber,
-                    dataToSend,
-                    chunkHash
-                );
+                        if (readError) {
 
-            console.log(
-                `Sending chunk ${this.chunkNumber} | ${bytesRead} bytes | SHA-256: ${chunkHash}`
-            );
+                            console.error(
+                                `Could not read chunk ${chunkNumber} for retransmission:`,
+                                readError.message
+                            );
 
-            this.offset += bytesRead;
-            this.chunkNumber++;
+                            return;
+                        }
 
-            const canWriteMore =
-                this.fileSocket.write(frame);
+                        if (bytesRead === 0) {
 
-            if (canWriteMore) {
+                            console.error(
+                                `Chunk ${chunkNumber} does not exist`
+                            );
 
-                this.sendNextChunk();
+                            return;
+                        }
 
-            } else {
+                        const dataToSend =
+                            buffer.subarray(
+                                0,
+                                bytesRead
+                            );
 
-                this.fileSocket.once(
-                    "drain",
-                    () => {
-                        this.sendNextChunk();
+                        const chunkHash =
+                            HashService.hashBuffer(
+                                dataToSend
+                            );
+
+                        const frame =
+                            ChunkProtocol.createChunkFrame(
+                                chunkNumber,
+                                dataToSend,
+                                chunkHash
+                            );
+
+                        console.log(
+                            `Retransmitting chunk ${chunkNumber} | ${bytesRead} bytes`
+                        );
+
+                        this.fileSocket.write(
+                            frame
+                        );
                     }
                 );
             }
-        }
-    );
-}    
+        );
+    }
 
     pauseTransfer() {
         if (!this.isPaused && this.fileSocket) {
