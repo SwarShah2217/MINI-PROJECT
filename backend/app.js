@@ -31,7 +31,7 @@ const transferManager =
 
 // Create the TCP server instance
 const tcpServer =
-    new TCPServer(connectionState);
+    new TCPServer(connectionState,transferManager);
 
 // Create the outgoing TCP connection manager
 
@@ -46,7 +46,9 @@ const webServer =
     new WebServer(tcpServer, discoveryService, connectionManager, transferManager);
 
 const fileTransferServer =
-    new FileTransferServer();
+    new FileTransferServer(
+        transferManager
+    );
 
 // Start UDP device discovery.
 discoveryService.start();

@@ -2,25 +2,53 @@ const HEADER_SIZE_BYTES = 4;
 
 class ChunkProtocol {
 
-    static createChunkFrame(chunkNumber, data, hash) {
+    static createChunkFrame(
+        chunkNumber,
+        data,
+        hash,
+        iv = null,
+        authTag = null
+    ) {
 
         const metadata = {
             type: "CHUNK",
             chunkNumber,
             size: data.length,
-            hash
+            hash,
+            encrypted:
+                iv !== null &&
+                authTag !== null
         };
 
+
+        if (metadata.encrypted) {
+
+            metadata.iv =
+                iv.toString("base64");
+
+            metadata.authTag =
+                authTag.toString("base64");
+        }
+
+
         const metadataBuffer =
-            Buffer.from(JSON.stringify(metadata), "utf8");
+            Buffer.from(
+                JSON.stringify(metadata),
+                "utf8"
+            );
+
 
         const lengthBuffer =
-            Buffer.alloc(HEADER_SIZE_BYTES);
+            Buffer.alloc(
+                HEADER_SIZE_BYTES
+            );
+
 
         lengthBuffer.writeUInt32BE(
             metadataBuffer.length,
             0
         );
+
 
         return Buffer.concat([
             lengthBuffer,

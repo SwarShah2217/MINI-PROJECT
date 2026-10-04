@@ -1,13 +1,16 @@
 const net = require("net");
 
 const { TCP_PORT } = require("../config");
+const KeyExchangeService =
+    require("../security/keyExchangeService");
 
 class TCPServer {
 
-    constructor(connectionState) {
+    constructor(connectionState,transferManager) {
 
         // Shared connection state
         this.connectionState = connectionState;
+        this.transferManager = transferManager;
 
         this.server = net.createServer((socket) => {
             this.handleConnection(socket);
@@ -84,6 +87,8 @@ class TCPServer {
                     this.pendingFileRequest = {
                         fileName: message.fileName,
                         fileSize: message.fileSize,
+                        transferId: message.transferId,
+                        senderPublicKey:message.publicKey,
                         socket: socket
                     };
                 }
@@ -204,9 +209,47 @@ class TCPServer {
 
         const socket = this.pendingFileRequest.socket;
 
+        const transferId =
+            this.pendingFileRequest.transferId;
+
+        const senderPublicKey =
+            this.pendingFileRequest.senderPublicKey;
+
+
+        const keyExchange =
+            KeyExchangeService.createKeyPair();
+
+
+        const sessionKey =
+            KeyExchangeService.deriveSessionKey(
+                keyExchange.ecdh,
+                senderPublicKey
+            );
+
+
+        this.transferManager
+            .sessionKeyManager
+            .storeSessionKey(
+                transferId,
+                sessionKey
+            );
+
+
+        console.log(
+            `Receiver session key established for transfer ${transferId}`
+        );
+
         socket.write(
             JSON.stringify({
-                type: "FILE_TRANSFER_ACCEPTED"
+
+                type:
+                    "FILE_TRANSFER_ACCEPTED",
+
+                transferId:
+                    transferId,
+
+                publicKey:
+                    keyExchange.publicKey
             })
         );
 

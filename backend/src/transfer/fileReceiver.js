@@ -6,6 +6,9 @@ const ChunkProtocol =
 const HashService =
     require("../integrity/hashService");
 
+const EncryptionService =
+    require("../security/encryptionService");
+
 class FileReceiver {
 
     receiveFile(
@@ -79,9 +82,89 @@ class FileReceiver {
             }
 
 
+            let dataToVerify =
+                chunkData;
+
+
+            if (metadata.encrypted) {
+
+                if (
+                    typeof metadata.iv !== "string" ||
+                    typeof metadata.authTag !== "string"
+                ) {
+
+                    console.error(
+                        `Chunk ${metadata.chunkNumber} is missing encryption metadata`
+                    );
+
+                    socket.destroy();
+                    return;
+                }
+
+
+                if (!this.encryptionKey) {
+
+                    console.error(
+                        "No encryption key available for decryption"
+                    );
+
+                    socket.destroy();
+                    return;
+                }
+
+
+                try {
+
+                    const iv =
+                        Buffer.from(
+                            metadata.iv,
+                            "base64"
+                        );
+
+                    const authTag =
+                        Buffer.from(
+                            metadata.authTag,
+                            "base64"
+                        );
+
+
+                    dataToVerify =
+                        EncryptionService.decryptBuffer(
+                            chunkData,
+                            this.encryptionKey,
+                            iv,
+                            authTag
+                        );
+
+
+                    console.log(
+                        `Chunk ${metadata.chunkNumber} DECRYPTED`
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        `Chunk ${metadata.chunkNumber} DECRYPTION FAILED:`,
+                        error.message
+                    );
+
+
+                    socket.write(
+                        JSON.stringify({
+                            type: "CHUNK_NACK",
+                            chunkNumber:
+                                metadata.chunkNumber
+                        }) + "\n"
+                    );
+
+                    return;
+                }
+            }
+
+
             const calculatedHash =
                 HashService.hashBuffer(
-                    chunkData
+                    dataToVerify
                 );
 
 
@@ -134,15 +217,14 @@ class FileReceiver {
 
             fs.writeSync(
                 fileDescriptor,
-                chunkData,
+                dataToVerify,
                 0,
-                chunkData.length,
+                dataToVerify.length,
                 chunkPosition
             );
 
-
             receivedBytes +=
-                chunkData.length;
+                dataToVerify.length;
 
 
             console.log(
@@ -188,7 +270,7 @@ class FileReceiver {
                 "data",
                 handleData
             );
-            
+
             try {
                 fs.closeSync(
                     fileDescriptor

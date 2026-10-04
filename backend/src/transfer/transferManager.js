@@ -3,6 +3,14 @@ const fs = require("fs");
 const path = require("path");
 const HashService = require("../integrity/hashService");
 const ChunkProtocol = require("./chunkProtocol");
+const EncryptionService =
+    require("../security/encryptionService");
+
+const SessionKeyManager =
+    require("../security/sessionKeyManager");
+
+const KeyExchangeService =
+    require("../security/keyExchangeService");
 
 const {
     FILE_TRANSFER_PORT
@@ -17,6 +25,10 @@ class TransferManager {
         // Stores a queue of files waiting to be transferred
         this.transferQueue = [];
         this.activeTransfer = null;
+        this.sessionKeyManager =
+            new SessionKeyManager();
+
+        this.keyExchanges = new Map();
     }
 
     // Send file metadata to the connected peer
@@ -86,11 +98,20 @@ class TransferManager {
         this.activeTransfer = this.transferQueue.shift();
         this.activeTransfer.status = "pending";
 
+        const keyExchange =
+            KeyExchangeService.createKeyPair();
+
+        this.keyExchanges.set(
+            this.activeTransfer.transferId,
+            keyExchange.ecdh
+        );
+
         const request = {
             type: "FILE_TRANSFER_REQUEST",
             fileName: this.activeTransfer.fileName,
             fileSize: this.activeTransfer.fileSize,
-            transferId: this.activeTransfer.transferId
+            transferId: this.activeTransfer.transferId,
+            publicKey: keyExchange.publicKey
         };
 
         socket.write(JSON.stringify(request));
@@ -252,7 +273,22 @@ socket.on("data", (data) => {
         this.offset = 0;
         this.chunkSize = 64 * 1024; // Send in 64 KB chunks
         this.chunkNumber = 0;
+        this.encryptionKey =
+            this.sessionKeyManager.getSessionKey(
+                this.activeTransfer.transferId
+            );
 
+
+        if (!this.encryptionKey) {
+
+            console.error(
+                "No session encryption key available"
+            );
+
+            fileSocket.destroy();
+            return;
+        }
+                
         console.log(`Starting file transfer: ${this.activeTransfer.fileName}`);
 
         // Calculate complete file SHA-256 before transfer
@@ -381,16 +417,24 @@ socket.on("data", (data) => {
                     );
 
 
+                const encrypted =
+                    EncryptionService.encryptBuffer(
+                        dataToSend,
+                        this.encryptionKey
+                    );
+
 
                 const frame =
                     ChunkProtocol.createChunkFrame(
                         this.chunkNumber,
-                        dataToSend,
-                        chunkHash
+                        encrypted.encryptedData,
+                        chunkHash,
+                        encrypted.iv,
+                        encrypted.authTag
                     );
 
                 console.log(
-                    `Sending chunk ${this.chunkNumber} | ${bytesRead} bytes | SHA-256: ${chunkHash}`
+                    `Prepared encrypted chunk ${this.chunkNumber} | Plain: ${bytesRead} bytes | Encrypted: ${encrypted.encryptedData.length} bytes`
                 );
 
                 this.offset += bytesRead;

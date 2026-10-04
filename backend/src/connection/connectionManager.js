@@ -1,6 +1,8 @@
 const net = require("net");
 
 const { TCP_PORT } = require("../config");
+const KeyExchangeService =
+    require("../security/keyExchangeService");
 
 class ConnectionManager {
 
@@ -72,6 +74,49 @@ class ConnectionManager {
                 if (message.type === "FILE_TRANSFER_ACCEPTED") {
 
                     console.log("File transfer accepted by peer");
+
+                    const transferId =
+                        message.transferId;
+
+                    const senderECDH =
+                        this.transferManager
+                            .keyExchanges
+                            .get(transferId);
+
+
+                    if (!senderECDH) {
+
+                        console.error(
+                            `No ECDH key exchange found for transfer ${transferId}`
+                        );
+
+                        return;
+                    }
+
+
+                    const sessionKey =
+                        KeyExchangeService.deriveSessionKey(
+                            senderECDH,
+                            message.publicKey
+                        );
+
+
+                    this.transferManager
+                        .sessionKeyManager
+                        .storeSessionKey(
+                            transferId,
+                            sessionKey
+                        );
+
+
+                    this.transferManager
+                        .keyExchanges
+                        .delete(transferId);
+
+
+                    console.log(
+                        `Sender session key established for transfer ${transferId}`
+                    );
 
                     this.transferManager
                         .connectForFileTransfer(ip)

@@ -5,8 +5,8 @@ const FileReceiver = require("./fileReceiver");
 
 class FileTransferServer {
 
-    constructor() {
-
+    constructor(transferManager) {
+        this.transferManager = transferManager;
         this.fileReceiver = new FileReceiver();
 
         this.server = net.createServer((socket) => {
@@ -64,6 +64,29 @@ class FileTransferServer {
                         // Stop the header parser from receiving
                         // any more file data.
                         socket.removeAllListeners("data");
+                        
+                        const sessionKey =
+                            this.transferManager
+                                .sessionKeyManager
+                                .getSessionKey(
+                                    header.transferId
+                                );
+
+
+                        if (!sessionKey) {
+
+                            console.error(
+                                `No receiver session key for transfer ${header.transferId}`
+                            );
+
+                            socket.destroy();
+                            return;
+                        }
+
+
+                        this.fileReceiver.encryptionKey =
+                            sessionKey;
+
 
                         // Start saving the file
                         this.fileReceiver.receiveFile(
