@@ -13,6 +13,7 @@ class FileReceiver {
         fileName,
         fileSize,
         transferId,
+        fileHash,
         initialData
     ) {
 
@@ -176,9 +177,7 @@ class FileReceiver {
             }
         }
 
-
-        function completeTransfer() {
-
+        async function completeTransfer() {
             if (transferCompleted) {
                 return;
             }
@@ -189,27 +188,105 @@ class FileReceiver {
                 "data",
                 handleData
             );
+            
+            try {
+                fs.closeSync(
+                    fileDescriptor
+                );
 
-            fs.closeSync(
-                fileDescriptor
-            );
 
-            console.log(
-                `File received successfully: ${filePath}`
-            );
+                console.log(
+                    "Calculating final file SHA-256..."
+                );
 
-            console.log(
-                `Transfer complete: ${receivedBytes}/${fileSize} bytes`
-            );
 
-            socket.write(
-                JSON.stringify({
-                    type:
-                        "FILE_TRANSFER_COMPLETE"
-                }) + "\n"
-            );
+                const calculatedFileHash =
+                    await HashService.hashFile(
+                        filePath
+                    );
+
+
+                console.log(
+                    `Expected file SHA-256:   ${fileHash}`
+                );
+
+                console.log(
+                    `Calculated file SHA-256: ${calculatedFileHash}`
+                );
+
+
+                const fileValid =
+                    HashService.hashesMatch(
+                        fileHash,
+                        calculatedFileHash
+                    );
+
+
+                if (!fileValid) {
+
+                    console.error(
+                        "FINAL FILE SHA-256 VERIFICATION FAILED"
+                    );
+
+
+                    fs.unlink(
+                        filePath,
+                        (error) => {
+
+                            if (!error) {
+
+                                console.log(
+                                    "Deleted file that failed final integrity verification"
+                                );
+                            }
+                        }
+                    );
+
+
+                    socket.write(
+                        JSON.stringify({
+                            type:
+                                "FILE_INTEGRITY_FAILED"
+                        }) + "\n"
+                    );
+
+                    return;
+                }
+
+
+                console.log(
+                    "FINAL FILE SHA-256 VERIFIED"
+                );
+
+
+                console.log(
+                    `File received successfully: ${filePath}`
+                );
+
+
+                console.log(
+                    `Transfer complete: ${receivedBytes}/${fileSize} bytes`
+                );
+
+
+                socket.write(
+                    JSON.stringify({
+                        type:
+                            "FILE_TRANSFER_COMPLETE"
+                    }) + "\n"
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    "Final file verification error:",
+                    error.message
+                );
+
+                socket.destroy();
+            }
         }
-
 
         const handleIncomplete = () => {
 

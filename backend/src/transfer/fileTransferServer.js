@@ -71,6 +71,7 @@ class FileTransferServer {
                             header.fileName,
                             header.fileSize,
                             header.transferId,
+                            header.fileHash,
                             remainingData
                         );
 

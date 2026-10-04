@@ -191,6 +191,21 @@ socket.on("data", (data) => {
 
         if (
             message.type ===
+            "FILE_INTEGRITY_FAILED"
+        ) {
+
+            console.error(
+                "Receiver reported FINAL FILE SHA-256 FAILURE"
+            );
+
+            socket.end();
+
+            continue;
+        }
+
+
+        if (
+            message.type ===
             "FILE_TRANSFER_COMPLETE"
         ) {
 
@@ -240,27 +255,76 @@ socket.on("data", (data) => {
 
         console.log(`Starting file transfer: ${this.activeTransfer.fileName}`);
 
-        // Send file metadata header first
-        const header = JSON.stringify({
-            fileName: this.activeTransfer.fileName,
-            fileSize: this.activeTransfer.fileSize,
-            transferId: this.activeTransfer.transferId
-        }) + "\n";
+        // Calculate complete file SHA-256 before transfer
+        HashService.hashFile(
+            this.activeTransfer.filePath
+        )
+        .then((fileHash) => {
 
-        fileSocket.write(header);
-        console.log("File transfer header sent");
+            this.activeTransfer.fileHash =
+                fileHash;
 
-        // Open the file manually rather than piping it
-        fs.open(this.activeTransfer.filePath, 'r', (error, fd) => {
-            if (error) {
-                console.error("Error opening file:", error.message);
-                fileSocket.destroy();
-                return;
-            }
-            
-            this.fileDescriptor = fd;
-            this.sendNextChunk(); // Kick off the chunk loop
+            console.log(
+                `Complete file SHA-256: ${fileHash}`
+            );
+
+
+            // Send file metadata header
+            const header =
+                JSON.stringify({
+                    fileName:
+                        this.activeTransfer.fileName,
+
+                    fileSize:
+                        this.activeTransfer.fileSize,
+
+                    transferId:
+                        this.activeTransfer.transferId,
+
+                    fileHash:
+                        fileHash
+
+                }) + "\n";
+
+
+            fileSocket.write(header);
+
+            console.log(
+                "File transfer header sent"
+            );
+
+
+            // Open file after hash is ready
+            fs.open(
+                this.activeTransfer.filePath,
+                "r",
+                (error, fd) => {
+                    if (error) {
+                        console.error(
+                            "Error opening file:",
+                            error.message
+                        );
+
+                        fileSocket.destroy();
+                        return;
+                    }
+
+                    this.fileDescriptor = fd;
+                    this.sendNextChunk();
+                }
+            );
+
+        })
+        .catch((error) => {
+
+            console.error(
+                "Could not calculate complete file SHA-256:",
+                error.message
+            );
+
+            fileSocket.destroy();
         });
+
     }
 
     sendNextChunk() {
