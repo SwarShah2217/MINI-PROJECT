@@ -3,6 +3,8 @@ const path = require("path");
 
 const ChunkProtocol =
     require("./chunkProtocol");
+const HashService =
+    require("../integrity/hashService");
 
 class FileReceiver {
 
@@ -50,53 +52,88 @@ class FileReceiver {
         let receivedBytes = 0;
         let transferCompleted = false;
 
-        const parseChunk =
+        const parseChunk = 
             ChunkProtocol.createParser(
                 (metadata, chunkData) => {
 
-                    if (transferCompleted) {
-                        return;
-                    }
+            if (transferCompleted) {
+                return;
+            }
 
-                    if (
-                        receivedBytes +
-                        chunkData.length >
-                        fileSize
-                    ) {
+            if (
+                receivedBytes +
+                chunkData.length >
+                fileSize
+            ) {
 
-                        console.error(
-                            "Received more data than expected"
-                        );
+                console.error(
+                    "Received more data than expected"
+                );
 
-                        socket.destroy();
-                        return;
-                    }
+                socket.destroy();
+                return;
+            }
 
-                    console.log(
-                        `Received chunk ${metadata.chunkNumber} | ${chunkData.length} bytes | SHA-256: ${metadata.hash}`
-                    );
 
-                    receivedBytes +=
-                        chunkData.length;
+            const calculatedHash =
+                HashService.hashBuffer(
+                    chunkData
+                );
 
-                    writeStream.write(
-                        chunkData
-                    );
 
-                    console.log(
-                        `Received ${receivedBytes}/${fileSize} bytes`
-                    );
+            const isValid =
+                HashService.hashesMatch(
+                    metadata.hash,
+                    calculatedHash
+                );
 
-                    if (
-                        receivedBytes ===
-                        fileSize
-                    ) {
 
-                        completeTransfer();
-                    }
-                }
+            if (!isValid) {
+
+                console.error(
+                    `Chunk ${metadata.chunkNumber} FAILED SHA-256 verification`
+                );
+
+                console.error(
+                    `Expected:   ${metadata.hash}`
+                );
+
+                console.error(
+                    `Calculated: ${calculatedHash}`
+                );
+
+                return;
+            }
+
+
+            console.log(
+                `Chunk ${metadata.chunkNumber} SHA-256 VERIFIED`
             );
 
+
+            receivedBytes +=
+                chunkData.length;
+
+
+            writeStream.write(
+                chunkData
+            );
+
+
+            console.log(
+                `Received ${receivedBytes}/${fileSize} bytes`
+            );
+
+
+            if (
+                receivedBytes ===
+                fileSize
+            ) {
+
+                completeTransfer();
+            }
+        }
+    );
 
         function handleData(data) {
 
