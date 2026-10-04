@@ -1,6 +1,8 @@
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
+const HashService = require("../integrity/hashService");
+const ChunkProtocol = require("./chunkProtocol");
 
 const {
     FILE_TRANSFER_PORT
@@ -171,6 +173,7 @@ class TransferManager {
         // State variables for manual chunking
         this.offset = 0;
         this.chunkSize = 64 * 1024; // Send in 64 KB chunks
+        this.chunkNumber = 0;
 
         console.log(`Starting file transfer: ${this.activeTransfer.fileName}`);
 
@@ -198,44 +201,91 @@ class TransferManager {
     }
 
     sendNextChunk() {
-        // If user paused, break the loop and stop reading
-        if (this.isPaused || !this.fileSocket) return;
 
-        const buffer = Buffer.alloc(this.chunkSize);
+    if (this.isPaused || !this.fileSocket) {
+        return;
+    }
 
-        // Read exactly one chunk of data starting from our current offset
-        fs.read(this.fileDescriptor, buffer, 0, this.chunkSize, this.offset, (error, bytesRead) => {
+    const buffer =
+        Buffer.alloc(this.chunkSize);
+
+    fs.read(
+        this.fileDescriptor,
+        buffer,
+        0,
+        this.chunkSize,
+        this.offset,
+        (error, bytesRead) => {
+
             if (error) {
-                console.error("Error reading file chunk:", error.message);
+
+                console.error(
+                    "Error reading file chunk:",
+                    error.message
+                );
+
                 this.fileSocket.destroy();
                 return;
             }
 
-            // 0 bytes read means we hit the end of the file
             if (bytesRead === 0) {
-                console.log("All chunks sent. Waiting for receiver confirmation...");
-                fs.close(this.fileDescriptor, () => {});
+
+                console.log(
+                    "All chunks sent. Waiting for receiver confirmation..."
+                );
+
+                fs.close(
+                    this.fileDescriptor,
+                    () => {}
+                );
+
                 return;
             }
 
-            // Extract only the data we actually read, update our position marker
-            const dataToSend = buffer.subarray(0, bytesRead);
-            this.offset += bytesRead;
+            const dataToSend =
+                buffer.subarray(
+                    0,
+                    bytesRead
+                );
 
-            // Write to the TCP socket
-            const canWriteMore = this.fileSocket.write(dataToSend);
+            const chunkHash =
+                HashService.hashBuffer(
+                    dataToSend
+                );
+
+            const frame =
+                ChunkProtocol.createChunkFrame(
+                    this.chunkNumber,
+                    dataToSend,
+                    chunkHash
+                );
+
+            console.log(
+                `Sending chunk ${this.chunkNumber} | ${bytesRead} bytes | SHA-256: ${chunkHash}`
+            );
+
+            this.offset += bytesRead;
+            this.chunkNumber++;
+
+            const canWriteMore =
+                this.fileSocket.write(frame);
 
             if (canWriteMore) {
-                // Buffer has room, instantly send the next chunk
+
                 this.sendNextChunk();
+
             } else {
-                // TCP buffer is full, wait for it to clear ('drain') before sending next
-                this.fileSocket.once('drain', () => {
-                    this.sendNextChunk();
-                });
+
+                this.fileSocket.once(
+                    "drain",
+                    () => {
+                        this.sendNextChunk();
+                    }
+                );
             }
-        });
-    }
+        }
+    );
+}    
 
     pauseTransfer() {
         if (!this.isPaused && this.fileSocket) {

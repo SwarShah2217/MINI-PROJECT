@@ -1,67 +1,120 @@
 const fs = require("fs");
 const path = require("path");
 
+const ChunkProtocol =
+    require("./chunkProtocol");
+
 class FileReceiver {
 
-    receiveFile(socket, fileName, fileSize, transferId, initialData) {
+    receiveFile(
+        socket,
+        fileName,
+        fileSize,
+        transferId,
+        initialData
+    ) {
 
-        const downloadsDirectory = path.join(
-            __dirname,
-            "../../downloads"
-        );
+        const downloadsDirectory =
+            path.join(
+                __dirname,
+                "../../downloads"
+            );
 
-        // Create downloads folder if it does not exist
         if (!fs.existsSync(downloadsDirectory)) {
-            fs.mkdirSync(downloadsDirectory, {
-                recursive: true
-            });
+
+            fs.mkdirSync(
+                downloadsDirectory,
+                {
+                    recursive: true
+                }
+            );
         }
 
-        // Prevent the incoming file name from containing a path
-        fileName = path.basename(fileName);
+        fileName =
+            path.basename(fileName);
 
-        const safeFileName = transferId ? `${transferId}-${fileName}` : fileName;
+        const safeFileName =
+            transferId
+                ? `${transferId}-${fileName}`
+                : fileName;
 
-        const filePath = path.join(
-            downloadsDirectory,
-            safeFileName
-        );
+        const filePath =
+            path.join(
+                downloadsDirectory,
+                safeFileName
+            );
 
         const writeStream =
             fs.createWriteStream(filePath);
 
         let receivedBytes = 0;
+        let transferCompleted = false;
 
-        // Some file bytes may have arrived together
-        // with the header.
-        if (initialData && initialData.length > 0) {
+        const parseChunk =
+            ChunkProtocol.createParser(
+                (metadata, chunkData) => {
 
-            writeStream.write(initialData);
+                    if (transferCompleted) {
+                        return;
+                    }
 
-            receivedBytes += initialData.length;
+                    if (
+                        receivedBytes +
+                        chunkData.length >
+                        fileSize
+                    ) {
 
-            console.log(
-                `Received ${receivedBytes} bytes`
+                        console.error(
+                            "Received more data than expected"
+                        );
+
+                        socket.destroy();
+                        return;
+                    }
+
+                    console.log(
+                        `Received chunk ${metadata.chunkNumber} | ${chunkData.length} bytes | SHA-256: ${metadata.hash}`
+                    );
+
+                    receivedBytes +=
+                        chunkData.length;
+
+                    writeStream.write(
+                        chunkData
+                    );
+
+                    console.log(
+                        `Received ${receivedBytes}/${fileSize} bytes`
+                    );
+
+                    if (
+                        receivedBytes ===
+                        fileSize
+                    ) {
+
+                        completeTransfer();
+                    }
+                }
             );
+
+
+        function handleData(data) {
+
+            try {
+
+                parseChunk(data);
+
+            } catch (error) {
+
+                console.error(
+                    "Chunk protocol error:",
+                    error.message
+                );
+
+                socket.destroy();
+            }
         }
 
-        // Receive the remaining file bytes
-        socket.on("data", (data) => {
-
-            receivedBytes += data.length;
-
-            writeStream.write(data);
-
-            console.log(
-                `Received ${receivedBytes} bytes`
-            );
-
-            if (receivedBytes === fileSize) {
-                completeTransfer();
-            }
-        });
-
-        let transferCompleted = false;
 
         function completeTransfer() {
 
@@ -71,67 +124,130 @@ class FileReceiver {
 
             transferCompleted = true;
 
+            socket.removeListener(
+                "data",
+                handleData
+            );
+
             writeStream.end();
         }
 
+
         const handleIncomplete = () => {
+
             if (!transferCompleted) {
-                transferCompleted = true; // prevent multiple triggers
-                console.error(`File transfer ended early: ${receivedBytes}/${fileSize} bytes`);
+
+                transferCompleted = true;
+
+                console.error(
+                    `File transfer ended early: ${receivedBytes}/${fileSize} bytes`
+                );
+
                 writeStream.close(() => {
-                    fs.unlink(filePath, (err) => {
-                        if (!err) console.log(`Deleted partially downloaded file: ${filePath}`);
-                    });
+
+                    fs.unlink(
+                        filePath,
+                        (error) => {
+
+                            if (!error) {
+
+                                console.log(
+                                    `Deleted partially downloaded file: ${filePath}`
+                                );
+                            }
+                        }
+                    );
                 });
             }
         };
 
-        socket.on("end", handleIncomplete);
-        socket.on("close", handleIncomplete);
 
-        writeStream.on("finish", () => {
+        socket.on(
+            "data",
+            handleData
+        );
 
-            if (receivedBytes === fileSize) {
 
-                console.log(
-                    `File received successfully: ${filePath}`
-                );
+        if (
+            initialData &&
+            initialData.length > 0
+        ) {
 
-                console.log(
-                    `Transfer complete: ${receivedBytes}/${fileSize} bytes`
-                );
+            handleData(initialData);
+        }
 
-                // Tell sender the complete file has been saved
-                socket.write(JSON.stringify({
-                    type: "FILE_TRANSFER_COMPLETE"
-                }) + "\n");
 
-            } else {
+        socket.on(
+            "end",
+            handleIncomplete
+        );
+
+        socket.on(
+            "close",
+            handleIncomplete
+        );
+
+
+        writeStream.on(
+            "finish",
+            () => {
+
+                if (
+                    receivedBytes ===
+                    fileSize
+                ) {
+
+                    console.log(
+                        `File received successfully: ${filePath}`
+                    );
+
+                    console.log(
+                        `Transfer complete: ${receivedBytes}/${fileSize} bytes`
+                    );
+
+                    socket.write(
+                        JSON.stringify({
+                            type:
+                                "FILE_TRANSFER_COMPLETE"
+                        }) + "\n"
+                    );
+
+                } else {
+
+                    console.error(
+                        `File transfer incomplete: ${receivedBytes}/${fileSize} bytes`
+                    );
+                }
+            }
+        );
+
+
+        writeStream.on(
+            "error",
+            (error) => {
 
                 console.error(
-                    `File transfer incomplete: ${receivedBytes}/${fileSize} bytes`
+                    "Error writing received file:",
+                    error.message
                 );
+
+                socket.destroy();
             }
-        });
+        );
 
-        writeStream.on("error", (error) => {
 
-            console.error(
-                "Error writing received file:",
-                error.message
-            );
+        socket.on(
+            "error",
+            (error) => {
 
-            socket.destroy();
-        });
+                console.error(
+                    "File receiver socket error:",
+                    error.message
+                );
 
-        socket.on("error", (error) => {
-
-            console.error(
-                "File receiver socket error:",
-                error.message
-            );
-            handleIncomplete();
-        });
+                handleIncomplete();
+            }
+        );
     }
 }
 
