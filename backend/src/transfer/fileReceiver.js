@@ -46,8 +46,11 @@ class FileReceiver {
                 safeFileName
             );
 
-        const writeStream =
-            fs.createWriteStream(filePath);
+        const fileDescriptor =
+        fs.openSync(
+            filePath,
+            "w"
+        );
 
         let receivedBytes = 0;
         let transferCompleted = false;
@@ -90,27 +93,27 @@ class FileReceiver {
 
             if (!isValid) {
 
-    console.error(
-        `Chunk ${metadata.chunkNumber} FAILED SHA-256 verification`
-    );
+                console.error(
+                    `Chunk ${metadata.chunkNumber} FAILED SHA-256 verification`
+                );
 
-    console.error(
-        `Expected:   ${metadata.hash}`
-    );
+                console.error(
+                    `Expected:   ${metadata.hash}`
+                );
 
-    console.error(
-        `Calculated: ${calculatedHash}`
-    );
+                console.error(
+                    `Calculated: ${calculatedHash}`
+                );
 
-    socket.write(
-        JSON.stringify({
-            type: "CHUNK_NACK",
-            chunkNumber: metadata.chunkNumber
-        }) + "\n"
-    );
+                socket.write(
+                    JSON.stringify({
+                        type: "CHUNK_NACK",
+                        chunkNumber: metadata.chunkNumber
+                    }) + "\n"
+                );
 
-    return;
-}
+                return;
+            }
 
             console.log(
                 `Chunk ${metadata.chunkNumber} SHA-256 VERIFIED`
@@ -123,13 +126,22 @@ class FileReceiver {
                 }) + "\n"
             );
 
+            const chunkPosition =
+                metadata.chunkNumber *
+                (64 * 1024);
+
+
+            fs.writeSync(
+                fileDescriptor,
+                chunkData,
+                0,
+                chunkData.length,
+                chunkPosition
+            );
+
+
             receivedBytes +=
                 chunkData.length;
-
-
-            writeStream.write(
-                chunkData
-            );
 
 
             console.log(
@@ -178,7 +190,24 @@ class FileReceiver {
                 handleData
             );
 
-            writeStream.end();
+            fs.closeSync(
+                fileDescriptor
+            );
+
+            console.log(
+                `File received successfully: ${filePath}`
+            );
+
+            console.log(
+                `Transfer complete: ${receivedBytes}/${fileSize} bytes`
+            );
+
+            socket.write(
+                JSON.stringify({
+                    type:
+                        "FILE_TRANSFER_COMPLETE"
+                }) + "\n"
+            );
         }
 
 
@@ -192,21 +221,33 @@ class FileReceiver {
                     `File transfer ended early: ${receivedBytes}/${fileSize} bytes`
                 );
 
-                writeStream.close(() => {
+                try {
 
-                    fs.unlink(
-                        filePath,
-                        (error) => {
-
-                            if (!error) {
-
-                                console.log(
-                                    `Deleted partially downloaded file: ${filePath}`
-                                );
-                            }
-                        }
+                    fs.closeSync(
+                        fileDescriptor
                     );
-                });
+
+                } catch (error) {
+
+                    console.error(
+                        "Could not close incomplete file:",
+                        error.message
+                    );
+                }
+
+
+                fs.unlink(
+                    filePath,
+                    (error) => {
+
+                        if (!error) {
+
+                            console.log(
+                                `Deleted partially downloaded file: ${filePath}`
+                            );
+                        }
+                    }
+                );
             }
         };
 
@@ -236,53 +277,6 @@ class FileReceiver {
             handleIncomplete
         );
 
-
-        writeStream.on(
-            "finish",
-            () => {
-
-                if (
-                    receivedBytes ===
-                    fileSize
-                ) {
-
-                    console.log(
-                        `File received successfully: ${filePath}`
-                    );
-
-                    console.log(
-                        `Transfer complete: ${receivedBytes}/${fileSize} bytes`
-                    );
-
-                    socket.write(
-                        JSON.stringify({
-                            type:
-                                "FILE_TRANSFER_COMPLETE"
-                        }) + "\n"
-                    );
-
-                } else {
-
-                    console.error(
-                        `File transfer incomplete: ${receivedBytes}/${fileSize} bytes`
-                    );
-                }
-            }
-        );
-
-
-        writeStream.on(
-            "error",
-            (error) => {
-
-                console.error(
-                    "Error writing received file:",
-                    error.message
-                );
-
-                socket.destroy();
-            }
-        );
 
 
         socket.on(
