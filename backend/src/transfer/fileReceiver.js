@@ -90,26 +90,38 @@ class FileReceiver {
 
             if (!isValid) {
 
-                console.error(
-                    `Chunk ${metadata.chunkNumber} FAILED SHA-256 verification`
-                );
+    console.error(
+        `Chunk ${metadata.chunkNumber} FAILED SHA-256 verification`
+    );
 
-                console.error(
-                    `Expected:   ${metadata.hash}`
-                );
+    console.error(
+        `Expected:   ${metadata.hash}`
+    );
 
-                console.error(
-                    `Calculated: ${calculatedHash}`
-                );
+    console.error(
+        `Calculated: ${calculatedHash}`
+    );
 
-                return;
-            }
+    socket.write(
+        JSON.stringify({
+            type: "CHUNK_NACK",
+            chunkNumber: metadata.chunkNumber
+        }) + "\n"
+    );
 
+    return;
+}
 
             console.log(
                 `Chunk ${metadata.chunkNumber} SHA-256 VERIFIED`
             );
 
+            socket.write(
+                JSON.stringify({
+                    type: "CHUNK_ACK",
+                    chunkNumber: metadata.chunkNumber
+                }) + "\n"
+            );
 
             receivedBytes +=
                 chunkData.length;

@@ -116,32 +116,92 @@ class TransferManager {
                 }
             );
 
-            socket.on("data", (data) => {
+            let responseBuffer = "";
 
-                try {
+socket.on("data", (data) => {
 
-                    const message =
-                        JSON.parse(data.toString());
+    responseBuffer += data.toString("utf8");
 
-                    if (message.type === "FILE_TRANSFER_COMPLETE") {
+    let newlineIndex;
 
-                        console.log(
-                            "Receiver confirmed file transfer is complete"
-                        );
+    while (
+        (newlineIndex = responseBuffer.indexOf("\n")) !== -1
+    ) {
 
-                        this.cleanupTemporaryFile();
+        const messageText =
+            responseBuffer
+                .slice(0, newlineIndex)
+                .trim();
 
-                        socket.end();
-                    }
+        responseBuffer =
+            responseBuffer.slice(
+                newlineIndex + 1
+            );
 
-                } catch (error) {
+        if (!messageText) {
+            continue;
+        }
 
-                    console.error(
-                        "Invalid file transfer response:",
-                        error.message
-                    );
-                }
-            });
+        let message;
+
+        try {
+
+            message =
+                JSON.parse(messageText);
+
+        } catch (error) {
+
+            console.error(
+                "Invalid file transfer response:",
+                messageText
+            );
+
+            continue;
+        }
+
+
+        if (
+            message.type ===
+            "CHUNK_ACK"
+        ) {
+
+            console.log(
+                `ACK received for chunk ${message.chunkNumber}`
+            );
+
+            continue;
+        }
+
+
+        if (
+            message.type ===
+            "CHUNK_NACK"
+        ) {
+
+            console.log(
+                `NACK received for chunk ${message.chunkNumber}`
+            );
+
+            continue;
+        }
+
+
+        if (
+            message.type ===
+            "FILE_TRANSFER_COMPLETE"
+        ) {
+
+            console.log(
+                "Receiver confirmed file transfer is complete"
+            );
+
+            this.cleanupTemporaryFile();
+
+            socket.end();
+        }
+    }
+});
+
 
             socket.on("error", (error) => {
 
