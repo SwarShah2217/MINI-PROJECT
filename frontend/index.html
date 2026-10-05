@@ -64,6 +64,40 @@
 
     </div>
 
+    <!-- Folder synchronization section -->
+    <div class="folder-sync-section">
+
+        <h2>Folder Sync</h2>
+
+        <p>
+            Synchronize new and modified files
+            with the connected device.
+        </p>
+
+        <input
+            type="text"
+            id="sourceFolderPath"
+            placeholder="Source folder path"
+            disabled
+        >
+
+        <input
+            type="text"
+            id="destinationFolderPath"
+            placeholder="Destination folder path"
+            disabled
+        >
+
+        <button id="syncFolderButton" disabled>
+            Sync Folder
+        </button>
+
+        <p id="folderSyncStatus">
+            Connect to a device to synchronize folders.
+        </p>
+
+    </div>
+
 
     <div id="connectionRequest" class="request-box hidden">
 

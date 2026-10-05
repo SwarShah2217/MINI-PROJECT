@@ -60,6 +60,28 @@ const cancelButton =
 
 let isCancelled = false;
 
+// Folder sync controls
+const sourceFolderPath =
+    document.getElementById(
+        "sourceFolderPath"
+    );
+
+const destinationFolderPath =
+    document.getElementById(
+        "destinationFolderPath"
+    );
+
+const syncFolderButton =
+    document.getElementById(
+        "syncFolderButton"
+    );
+
+const folderSyncStatus =
+    document.getElementById(
+        "folderSyncStatus"
+    );
+
+
 // Current TCP connection state
 let currentConnectionStatus = {
     status: "disconnected",
@@ -121,6 +143,14 @@ async function loadConnectionStatus() {
 
             fileInput.disabled = false;
             sendFileButton.disabled = false;
+            
+            sourceFolderPath.disabled = false;
+            destinationFolderPath.disabled = false;
+            syncFolderButton.disabled = false;
+
+            folderSyncStatus.textContent =
+                "Enter the source and destination folder paths.";
+
 
             // Always check backend for active transfer status
             const res = await fetch("/api/transfer/out-status");
@@ -239,6 +269,13 @@ async function loadConnectionStatus() {
 
             fileInput.disabled = true;
             sendFileButton.disabled = true;
+
+            sourceFolderPath.disabled = true;
+            destinationFolderPath.disabled = true;
+            syncFolderButton.disabled = true;
+
+            folderSyncStatus.textContent =
+                "Connect to a device to synchronize folders.";
 
             selectedFile.textContent =
                 "Connect to a device to select a file.";
@@ -626,3 +663,95 @@ cancelButton.addEventListener("click", async () => {
         console.error("Failed to cancel transfer:", error);
     }
 });
+
+// Start folder synchronization
+syncFolderButton.addEventListener(
+    "click",
+    async () => {
+
+        const sourcePath =
+            sourceFolderPath.value.trim();
+
+        const destinationPath =
+            destinationFolderPath.value.trim();
+
+
+        if (!sourcePath || !destinationPath) {
+
+            folderSyncStatus.textContent =
+                "Enter both folder paths.";
+
+            return;
+        }
+
+
+        syncFolderButton.disabled = true;
+
+        folderSyncStatus.textContent =
+            "Comparing folders...";
+
+
+        try {
+
+            const response =
+                await fetch(
+                    "/api/sync/request",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            sourcePath:
+                                sourcePath,
+
+                            destinationPath:
+                                destinationPath
+                        })
+                    }
+                );
+
+
+            const result =
+                await response.json();
+
+
+            if (!response.ok) {
+
+                folderSyncStatus.textContent =
+                    result.message ||
+                    "Folder sync request failed.";
+
+                return;
+            }
+
+
+            folderSyncStatus.textContent =
+                "Folder sync request sent.";
+
+        } catch (error) {
+
+            console.error(
+                "Folder sync request failed:",
+                error
+            );
+
+            folderSyncStatus.textContent =
+                "Folder sync request failed.";
+
+        } finally {
+
+            if (
+                currentConnectionStatus.status ===
+                "connected"
+            ) {
+
+                syncFolderButton.disabled =
+                    false;
+            }
+        }
+    }
+);
