@@ -41,13 +41,45 @@ class TCPServer {
             `TCP connection received from ${peerIp}:${socket.remotePort}`
         );
 
+        let messageBuffer = "";
 
         socket.on("data", (data) => {
 
-            try {
+            messageBuffer +=
+                data.toString();
 
-                const message = JSON.parse(data.toString());
 
+            let newlineIndex;
+
+
+            while (
+                (newlineIndex =
+                    messageBuffer.indexOf("\n")) !== -1
+            ) {
+
+                const messageText =
+                    messageBuffer
+                        .slice(0, newlineIndex)
+                        .trim();
+
+
+                messageBuffer =
+                    messageBuffer.slice(
+                        newlineIndex + 1
+                    );
+
+
+                if (!messageText) {
+                    continue;
+                }
+
+
+                try {
+
+                    const message =
+                        JSON.parse(
+                            messageText
+                        );
 
                 if (message.type === "CONNECTION_REQUEST") {
 
@@ -94,15 +126,15 @@ class TCPServer {
                 }
 
 
-            } catch (error) {
+                } catch (error) {
 
-                console.error(
-                    "Invalid TCP message:",
-                    error.message
-                );
+                    console.error(
+                        "Invalid TCP message:",
+                        error.message
+                    );
+                }
             }
         });
-
 
         socket.on("end", () => {
             console.log("TCP client disconnected");
@@ -153,7 +185,7 @@ class TCPServer {
         socket.write(
             JSON.stringify({
                 type: "CONNECTION_ACCEPTED"
-            })
+            }) + "\n"
         );
 
 
@@ -185,7 +217,7 @@ class TCPServer {
         socket.write(
             JSON.stringify({
                 type: "CONNECTION_REJECTED"
-            })
+            }) + "\n"
         );
 
 
@@ -250,7 +282,8 @@ class TCPServer {
 
                 publicKey:
                     keyExchange.publicKey
-            })
+
+            }) + "\n"
         );
 
         console.log(
@@ -275,7 +308,7 @@ class TCPServer {
         socket.write(
             JSON.stringify({
                 type: "FILE_TRANSFER_REJECTED"
-            })
+            }) + "\n"
         );
 
         console.log(

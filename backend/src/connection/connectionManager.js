@@ -38,16 +38,49 @@ class ConnectionManager {
                     type: "CONNECTION_REQUEST"
                 };
 
-                socket.write(JSON.stringify(request));
+                socket.write(
+                    JSON.stringify(request) +
+                    "\n"
+                );
             }
         );
 
+        let messageBuffer = "";
 
         socket.on("data", (data) => {
+            messageBuffer +=
+                data.toString();
 
-            try {
+            let newlineIndex;
 
-                const message = JSON.parse(data.toString());
+            while (
+                (newlineIndex =
+                    messageBuffer.indexOf("\n")) !== -1
+            ) {
+
+                const messageText =
+                    messageBuffer
+                        .slice(0, newlineIndex)
+                        .trim();
+
+
+                messageBuffer =
+                    messageBuffer.slice(
+                        newlineIndex + 1
+                    );
+
+
+                if (!messageText) {
+                    continue;
+                }
+
+
+                try {
+
+                    const message =
+                        JSON.parse(
+                            messageText
+                        );
 
                 if (message.type === "CONNECTION_ACCEPTED") {
 
@@ -142,15 +175,15 @@ class ConnectionManager {
                     console.log("File transfer rejected by peer");
                 }
 
-            } catch (error) {
+                } catch (error) {
 
-                console.error(
-                    "Invalid TCP response:",
-                    error.message
-                );
+                    console.error(
+                        "Invalid TCP response:",
+                        error.message
+                    );
+                }
             }
         });
-
 
         socket.on("error", (error) => {
 
