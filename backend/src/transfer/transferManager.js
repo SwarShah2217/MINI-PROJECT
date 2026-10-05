@@ -733,6 +733,24 @@ socket.on("data", (data) => {
             return;
         }
 
+
+        // Folder sync uses the original source file.
+        // Do not delete it after transfer.
+        if (this.activeTransfer.isFolderSync) {
+
+            console.log(
+                `Folder sync source preserved: ${this.activeTransfer.filePath}`
+            );
+
+            this.activeTransfer = null;
+
+            // Process the next file in the queue, if any
+            this.processQueue();
+
+            return;
+        }
+
+
         fs.unlink(
             this.activeTransfer.filePath,
             (error) => {
@@ -752,7 +770,7 @@ socket.on("data", (data) => {
                 );
 
                 this.activeTransfer = null;
-                
+
                 // Process the next file in the queue, if any
                 this.processQueue();
             }
