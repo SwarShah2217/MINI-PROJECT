@@ -117,7 +117,10 @@ class TransferManager {
             publicKey: keyExchange.publicKey
         };
 
-        socket.write(JSON.stringify(request));
+        socket.write(
+            JSON.stringify(request) +
+            "\n"
+        );
 
     }
 
