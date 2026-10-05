@@ -87,6 +87,82 @@ class TransferManager {
         return true;
     }
 
+    sendFileFromPath(
+        filePath,
+        relativePath
+    ) {
+
+        if (
+            this.connectionState.status !==
+            "connected"
+        ) {
+            return false;
+        }
+
+        if (!filePath || !relativePath) {
+            return false;
+        }
+
+        if (!fs.existsSync(filePath)) {
+
+            console.error(
+                `Folder sync file not found: ${filePath}`
+            );
+
+            return false;
+        }
+
+        const stats =
+            fs.statSync(filePath);
+
+        if (!stats.isFile()) {
+
+            console.error(
+                `Folder sync path is not a file: ${filePath}`
+            );
+
+            return false;
+        }
+
+        const transferId =
+            require("crypto").randomUUID();
+
+        this.transferQueue.push({
+
+            fileName:
+                path.basename(relativePath),
+
+            fileSize:
+                stats.size,
+
+            transferId:
+                transferId,
+
+            filePath:
+                filePath,
+
+            relativePath:
+                relativePath,
+
+            isFolderSync:
+                true,
+
+            status:
+                "queued"
+        });
+
+        console.log(
+            `Folder sync file queued: ${relativePath} (${stats.size} bytes)`
+        );
+
+        if (!this.activeTransfer) {
+            this.processQueue();
+        }
+
+        return true;
+    }
+
+
     // Process the next file in the queue
     processQueue() {
         if (this.activeTransfer || this.transferQueue.length === 0) {
