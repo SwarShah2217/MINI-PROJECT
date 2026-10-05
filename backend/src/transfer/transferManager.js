@@ -412,6 +412,7 @@ socket.on("data", (data) => {
             // Send file metadata header
             const header =
                 JSON.stringify({
+
                     fileName:
                         this.activeTransfer.fileName,
 
@@ -422,7 +423,16 @@ socket.on("data", (data) => {
                         this.activeTransfer.transferId,
 
                     fileHash:
-                        fileHash
+                        fileHash,
+
+                    isFolderSync:
+                        this.activeTransfer.isFolderSync === true,
+
+                    relativePath:
+                        this.activeTransfer.relativePath || null,
+
+                    destinationPath:
+                        this.activeTransfer.destinationPath || null
 
                 }) + "\n";
 
