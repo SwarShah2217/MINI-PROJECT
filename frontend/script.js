@@ -148,9 +148,14 @@ async function loadConnectionStatus() {
             destinationFolderPath.disabled = false;
             syncFolderButton.disabled = false;
 
-            folderSyncStatus.textContent =
-                "Enter the source and destination folder paths.";
+            if (
+                folderSyncStatus.textContent ===
+                "Connect to a device to synchronize folders."
+            ) {
 
+                folderSyncStatus.textContent =
+                    "Enter the source and destination folder paths.";
+            }
 
             // Always check backend for active transfer status
             const res = await fetch("/api/transfer/out-status");
@@ -755,3 +760,55 @@ syncFolderButton.addEventListener(
         }
     }
 );
+
+// Load folder synchronization status
+async function loadFolderSyncStatus() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/sync/status"
+            );
+
+        const data =
+            await response.json();
+
+
+        if (!data.ready) {
+            return;
+        }
+
+
+        const comparison =
+            data.comparison;
+
+
+        if (!comparison) {
+            return;
+        }
+
+
+        folderSyncStatus.textContent =
+            `Sync complete — ` +
+            `New: ${comparison.newFiles.length}, ` +
+            `Modified: ${comparison.modifiedFiles.length}, ` +
+            `Unchanged: ${comparison.unchangedFiles.length}`;
+
+    } catch (error) {
+
+        console.error(
+            "Unable to load folder sync status:",
+            error
+        );
+    }
+}
+
+// Check folder sync status every second
+setInterval(
+    loadFolderSyncStatus,
+    1000
+);
+
+// Check folder sync status on page load
+loadFolderSyncStatus();

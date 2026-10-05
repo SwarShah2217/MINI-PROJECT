@@ -83,3 +83,30 @@ button {
 .transfer-buttons button {
     margin: 5px;
 }
+
+
+/* Folder synchronization section */
+.folder-sync-section {
+    margin-top: 20px;
+    padding: 15px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+}
+
+.folder-sync-section input {
+    display: block;
+    width: 100%;
+    max-width: 500px;
+    box-sizing: border-box;
+    margin: 10px auto;
+    padding: 10px;
+}
+
+.folder-sync-section button {
+    margin-top: 5px;
+}
+
+#folderSyncStatus {
+    margin-top: 12px;
+    font-weight: bold;
+}
