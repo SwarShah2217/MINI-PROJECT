@@ -273,6 +273,9 @@ socket.on("data", (data) => {
         this.offset = 0;
         this.chunkSize = 64 * 1024; // Send in 64 KB chunks
         this.chunkNumber = 0;
+        // --------------
+        this.testCorruptionDone = false;
+        // -------------
         this.encryptionKey =
             this.sessionKeyManager.getSessionKey(
                 this.activeTransfer.transferId
@@ -422,7 +425,33 @@ socket.on("data", (data) => {
                         dataToSend,
                         this.encryptionKey
                     );
+// -------------
+                let encryptedDataToSend =
+    encrypted.encryptedData;
 
+
+if (
+    this.chunkNumber === 2 &&
+    !this.testCorruptionDone
+) {
+
+    encryptedDataToSend =
+        Buffer.from(
+            encrypted.encryptedData
+        );
+
+    encryptedDataToSend[0] =
+        encryptedDataToSend[0] ^ 0xff;
+
+    this.testCorruptionDone =
+        true;
+
+    console.log(
+        "TEST: Deliberately corrupted encrypted chunk 2"
+    );
+}
+
+//--------
 
                 const frame =
                     ChunkProtocol.createChunkFrame(
@@ -533,16 +562,28 @@ socket.on("data", (data) => {
                                 dataToSend
                             );
 
+
+                        const encrypted =
+                            EncryptionService.encryptBuffer(
+                                dataToSend,
+                                this.encryptionKey
+                            );
+
+
                         const frame =
                             ChunkProtocol.createChunkFrame(
                                 chunkNumber,
-                                dataToSend,
-                                chunkHash
+                                encrypted.encryptedData,
+                                chunkHash,
+                                encrypted.iv,
+                                encrypted.authTag
                             );
 
+
                         console.log(
-                            `Retransmitting chunk ${chunkNumber} | ${bytesRead} bytes`
+                            `Retransmitting encrypted chunk ${chunkNumber} | ${bytesRead} bytes`
                         );
+
 
                         this.fileSocket.write(
                             frame
