@@ -250,12 +250,23 @@ class ConnectionManager {
                             );
 
                         console.log(
-                            `Selected for folder sync: ${file.relativePath}`
+                            `Queueing folder sync file: ${file.relativePath}`
                         );
 
-                        console.log(
-                            `Source file path: ${sourceFilePath}`
-                        );
+                        const queued =
+                            this.transferManager
+                                .sendFileFromPath(
+                                    sourceFilePath,
+                                    file.relativePath,
+                                    this.pendingFolderDestinationPath
+                                );
+
+                        if (!queued) {
+
+                            console.error(
+                                `Could not queue folder sync file: ${file.relativePath}`
+                            );
+                        }
                     }
                 }
 
