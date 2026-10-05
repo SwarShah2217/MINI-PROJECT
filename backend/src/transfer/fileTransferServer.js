@@ -95,7 +95,10 @@ class FileTransferServer {
                             header.fileSize,
                             header.transferId,
                             header.fileHash,
-                            remainingData
+                            remainingData,
+                            header.isFolderSync === true,
+                            header.relativePath || null,
+                            header.destinationPath || null
                         );
 
                     } catch (error) {

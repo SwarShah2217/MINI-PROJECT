@@ -20,38 +20,130 @@ class FileReceiver {
         fileSize,
         transferId,
         fileHash,
-        initialData
+        initialData,
+        isFolderSync = false,
+        relativePath = null,
+        destinationPath = null
     ) {
 
-        const downloadsDirectory =
-            path.join(
-                __dirname,
-                "../../downloads"
-            );
+        let filePath;
 
-        if (!fs.existsSync(downloadsDirectory)) {
+
+        if (
+            isFolderSync &&
+            relativePath &&
+            destinationPath
+        ) {
+
+            const normalizedRelativePath =
+                path.normalize(relativePath);
+
+            if (
+                path.isAbsolute(
+                    normalizedRelativePath
+                ) ||
+                normalizedRelativePath === ".." ||
+                normalizedRelativePath.startsWith(
+                    ".." + path.sep
+                )
+            ) {
+
+                throw new Error(
+                    "Invalid folder sync relative path"
+                );
+            }
+
+
+            const destinationRoot =
+                path.resolve(
+                    destinationPath
+                );
+
+
+            filePath =
+                path.resolve(
+                    destinationRoot,
+                    normalizedRelativePath
+                );
+
+
+            const relativeCheck =
+                path.relative(
+                    destinationRoot,
+                    filePath
+                );
+
+
+            if (
+                relativeCheck === ".." ||
+                relativeCheck.startsWith(
+                    ".." + path.sep
+                ) ||
+                path.isAbsolute(relativeCheck)
+            ) {
+
+                throw new Error(
+                    "Folder sync path escapes destination folder"
+                );
+            }
+
+
+            const parentDirectory =
+                path.dirname(
+                    filePath
+                );
+
 
             fs.mkdirSync(
-                downloadsDirectory,
+                parentDirectory,
                 {
                     recursive: true
                 }
             );
+
+
+            console.log(
+                `Folder sync destination file: ${filePath}`
+            );
+
+        } else {
+
+            const downloadsDirectory =
+                path.join(
+                    __dirname,
+                    "../../downloads"
+                );
+
+
+            if (!fs.existsSync(downloadsDirectory)) {
+
+                fs.mkdirSync(
+                    downloadsDirectory,
+                    {
+                        recursive: true
+                    }
+                );
+            }
+
+
+            fileName =
+                path.basename(fileName);
+
+
+            const safeFileName =
+                transferId
+                    ? `${transferId}-${fileName}`
+                    : fileName;
+
+
+            filePath =
+                path.join(
+                    downloadsDirectory,
+                    safeFileName
+                );
         }
 
-        fileName =
-            path.basename(fileName);
-
-        const safeFileName =
-            transferId
-                ? `${transferId}-${fileName}`
-                : fileName;
-
-        const filePath =
-            path.join(
-                downloadsDirectory,
-                safeFileName
-            );
+        
 
         const fileDescriptor =
         fs.openSync(
