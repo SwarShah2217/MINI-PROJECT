@@ -114,18 +114,48 @@ class TCPServer {
                 }
 
                 if (message.type === "FILE_TRANSFER_REQUEST") {
+
                     console.log(
                         `Incoming file request: ${message.fileName} (${message.fileSize} bytes)`
                     );
 
-                    // Store file request until user accepts or rejects it
                     this.pendingFileRequest = {
-                        fileName: message.fileName,
-                        fileSize: message.fileSize,
-                        transferId: message.transferId,
-                        senderPublicKey:message.publicKey,
-                        socket: socket
+
+                        fileName:
+                            message.fileName,
+
+                        fileSize:
+                            message.fileSize,
+
+                        transferId:
+                            message.transferId,
+
+                        senderPublicKey:
+                            message.publicKey,
+
+                        isFolderSync:
+                            message.isFolderSync === true,
+
+                        relativePath:
+                            message.relativePath || null,
+
+                        destinationPath:
+                            message.destinationPath || null,
+
+                        socket:
+                            socket
                     };
+
+                    if (this.pendingFileRequest.isFolderSync) {
+
+                        console.log(
+                            `Folder sync file request: ${this.pendingFileRequest.relativePath}`
+                        );
+
+                        console.log(
+                            `Folder sync destination: ${this.pendingFileRequest.destinationPath}`
+                        );
+                    }
                 }
 
                 if (
