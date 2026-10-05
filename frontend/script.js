@@ -143,7 +143,13 @@ async function loadConnectionStatus() {
 
             fileInput.disabled = false;
             sendFileButton.disabled = false;
-            
+
+            if (fileInput.files.length === 0) {
+
+                selectedFile.textContent =
+                    "No file selected.";
+            }
+
             sourceFolderPath.disabled = false;
             destinationFolderPath.disabled = false;
             syncFolderButton.disabled = false;
