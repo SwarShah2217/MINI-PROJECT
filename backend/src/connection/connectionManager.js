@@ -3,6 +3,8 @@ const net = require("net");
 const { TCP_PORT } = require("../config");
 const KeyExchangeService =
     require("../security/keyExchangeService");
+const FolderComparator =
+    require("../sync/folderComparator");
 
 class ConnectionManager {
 
@@ -12,6 +14,8 @@ class ConnectionManager {
 
         // Used to create the separate file-transfer connection
         this.transferManager = transferManager;
+        this.pendingFolderManifest = null;
+        this.lastFolderComparison = null;
     }
 
     connectToDevice(ip) {
@@ -175,6 +179,73 @@ class ConnectionManager {
                     console.log("File transfer rejected by peer");
                 }
 
+                if (
+                    message.type ===
+                    "FOLDER_SYNC_RESPONSE"
+                ) {
+
+                    console.log(
+                        "Destination folder manifest received"
+                    );
+
+
+                    if (!this.pendingFolderManifest) {
+
+                        console.error(
+                            "No source folder manifest is pending"
+                        );
+
+                        continue;
+                    }
+
+
+                    const comparison =
+                        FolderComparator.compareFolders(
+                            this.pendingFolderManifest,
+                            message.destinationManifest
+                        );
+
+
+                    this.lastFolderComparison =
+                        comparison;
+
+
+                    this.pendingFolderManifest =
+                        null;
+
+
+                    console.log(
+                        "Folder comparison complete"
+                    );
+
+                    console.log(
+                        `New files: ${comparison.newFiles.length}`
+                    );
+
+                    console.log(
+                        `Modified files: ${comparison.modifiedFiles.length}`
+                    );
+
+                    console.log(
+                        `Unchanged files: ${comparison.unchangedFiles.length}`
+                    );
+                }
+
+
+                if (
+                    message.type ===
+                    "FOLDER_SYNC_ERROR"
+                ) {
+
+                    console.error(
+                        "Folder sync error from peer:",
+                        message.message
+                    );
+
+                    this.pendingFolderManifest =
+                        null;
+                }
+
                 } catch (error) {
 
                     console.error(
@@ -210,6 +281,59 @@ class ConnectionManager {
 
         return socket;
     }
+    
+    sendFolderSyncRequest(
+        sourceManifest,
+        destinationPath
+    ) {
+
+        if (
+            this.connectionState.status !==
+            "connected"
+        ) {
+
+            return false;
+        }
+
+
+        const socket =
+            this.connectionState.socket;
+
+
+        if (!socket) {
+
+            return false;
+        }
+
+
+        this.pendingFolderManifest =
+            sourceManifest;
+
+
+        this.lastFolderComparison =
+            null;
+
+
+        socket.write(
+            JSON.stringify({
+                type:
+                    "FOLDER_SYNC_REQUEST",
+
+                destinationPath:
+                    destinationPath
+
+            }) + "\n"
+        );
+
+
+        console.log(
+            `Folder sync request sent with ${sourceManifest.length} source files`
+        );
+
+
+        return true;
+    }
+
 }
 
 module.exports = ConnectionManager;

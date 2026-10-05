@@ -2,7 +2,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-
+const FolderScanner =
+    require("../sync/folderScanner");
 
 class WebServer {
 
@@ -424,6 +425,132 @@ class WebServer {
             const success = this.transferManager.cancelTransfer();
             res.writeHead(success ? 200 : 400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ success }));
+            return;
+        }
+
+        // Start folder comparison with connected peer
+        if (
+            req.url === "/api/sync/request" &&
+            req.method === "POST"
+        ) {
+
+            let body = "";
+
+
+            req.on("data", (chunk) => {
+
+                body +=
+                    chunk.toString();
+            });
+
+
+            req.on("end", async () => {
+
+                try {
+
+                    const data =
+                        JSON.parse(body);
+
+
+                    const sourceManifest =
+                        await FolderScanner.scanFolder(
+                            data.sourcePath
+                        );
+
+
+                    const success =
+                        this.connectionManager
+                            .sendFolderSyncRequest(
+                                sourceManifest,
+                                data.destinationPath
+                            );
+
+
+                    res.writeHead(
+                        success ? 200 : 400,
+                        {
+                            "Content-Type":
+                                "application/json"
+                        }
+                    );
+
+
+                    res.end(
+                        JSON.stringify({
+                            success:
+                                success,
+
+                            sourceFiles:
+                                sourceManifest.length
+                        })
+                    );
+
+
+                } catch (error) {
+
+                    console.error(
+                        "Folder sync request failed:",
+                        error.message
+                    );
+
+
+                    res.writeHead(
+                        400,
+                        {
+                            "Content-Type":
+                                "application/json"
+                        }
+                    );
+
+
+                    res.end(
+                        JSON.stringify({
+                            success:
+                                false,
+
+                            message:
+                                error.message
+                        })
+                    );
+                }
+            });
+
+
+            return;
+        }
+
+        // Return latest folder comparison
+        if (
+            req.url === "/api/sync/status" &&
+            req.method === "GET"
+        ) {
+
+            const comparison =
+                this.connectionManager
+                    .lastFolderComparison;
+
+
+            res.writeHead(
+                200,
+                {
+                    "Content-Type":
+                        "application/json"
+                }
+            );
+
+
+            res.end(
+                JSON.stringify({
+
+                    ready:
+                        comparison !== null,
+
+                    comparison:
+                        comparison
+                })
+            );
+
+
             return;
         }
 

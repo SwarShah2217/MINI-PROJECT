@@ -4,6 +4,9 @@ const { TCP_PORT } = require("../config");
 const KeyExchangeService =
     require("../security/keyExchangeService");
 
+const FolderScanner =
+    require("../sync/folderScanner");
+
 class TCPServer {
 
     constructor(connectionState,transferManager) {
@@ -89,7 +92,7 @@ class TCPServer {
                         socket.write(
                             JSON.stringify({
                                 type: "CONNECTION_REJECTED"
-                            })
+                            }) + "\n"
                         );
 
                         socket.end();
@@ -123,6 +126,67 @@ class TCPServer {
                         senderPublicKey:message.publicKey,
                         socket: socket
                     };
+                }
+
+                if (
+                    message.type ===
+                    "FOLDER_SYNC_REQUEST"
+                ) {
+
+                    console.log(
+                        "Folder sync request received"
+                    );
+
+
+                    const destinationPath =
+                        message.destinationPath;
+
+
+                    FolderScanner
+                        .scanFolder(
+                            destinationPath
+                        )
+                        .then(
+                            (destinationManifest) => {
+
+                                socket.write(
+                                    JSON.stringify({
+                                        type:
+                                            "FOLDER_SYNC_RESPONSE",
+
+                                        destinationManifest:
+                                            destinationManifest
+
+                                    }) + "\n"
+                                );
+
+
+                                console.log(
+                                    `Folder manifest sent: ${destinationManifest.length} files`
+                                );
+                            }
+                        )
+                        .catch(
+                            (error) => {
+
+                                console.error(
+                                    "Could not scan destination folder:",
+                                    error.message
+                                );
+
+
+                                socket.write(
+                                    JSON.stringify({
+                                        type:
+                                            "FOLDER_SYNC_ERROR",
+
+                                        message:
+                                            error.message
+
+                                    }) + "\n"
+                                );
+                            }
+                        );
                 }
 
 
