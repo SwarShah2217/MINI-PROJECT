@@ -462,6 +462,7 @@ class WebServer {
                         this.connectionManager
                             .sendFolderSyncRequest(
                                 sourceManifest,
+                                data.sourcePath,
                                 data.destinationPath
                             );
 

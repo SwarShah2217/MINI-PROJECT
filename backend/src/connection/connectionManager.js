@@ -1,5 +1,5 @@
 const net = require("net");
-
+const path = require("path");
 const { TCP_PORT } = require("../config");
 const KeyExchangeService =
     require("../security/keyExchangeService");
@@ -16,6 +16,7 @@ class ConnectionManager {
         this.transferManager = transferManager;
         this.pendingFolderManifest = null;
         this.lastFolderComparison = null;
+        this.pendingFolderSourcePath = null;
     }
 
     connectToDevice(ip) {
@@ -281,9 +282,10 @@ class ConnectionManager {
 
         return socket;
     }
-    
+
     sendFolderSyncRequest(
         sourceManifest,
+        sourcePath,
         destinationPath
     ) {
 
@@ -309,6 +311,8 @@ class ConnectionManager {
         this.pendingFolderManifest =
             sourceManifest;
 
+        this.pendingFolderSourcePath =
+            sourcePath;
 
         this.lastFolderComparison =
             null;
