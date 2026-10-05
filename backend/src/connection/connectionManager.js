@@ -17,6 +17,7 @@ class ConnectionManager {
         this.pendingFolderManifest = null;
         this.lastFolderComparison = null;
         this.pendingFolderSourcePath = null;
+        this.pendingFolderDestinationPath = null;
     }
 
     connectToDevice(ip) {
@@ -339,6 +340,9 @@ class ConnectionManager {
 
         this.pendingFolderSourcePath =
             sourcePath;
+
+        this.pendingFolderDestinationPath =
+            destinationPath;
 
         this.lastFolderComparison =
             null;

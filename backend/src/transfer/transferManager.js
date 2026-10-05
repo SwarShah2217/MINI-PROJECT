@@ -89,7 +89,8 @@ class TransferManager {
 
     sendFileFromPath(
         filePath,
-        relativePath
+        relativePath,
+        destinationPath
     ) {
 
         if (
@@ -144,6 +145,9 @@ class TransferManager {
             relativePath:
                 relativePath,
 
+            destinationPath:
+                destinationPath,
+
             isFolderSync:
                 true,
 
@@ -187,10 +191,27 @@ class TransferManager {
 
         const request = {
             type: "FILE_TRANSFER_REQUEST",
-            fileName: this.activeTransfer.fileName,
-            fileSize: this.activeTransfer.fileSize,
-            transferId: this.activeTransfer.transferId,
-            publicKey: keyExchange.publicKey
+
+            fileName:
+                this.activeTransfer.fileName,
+
+            fileSize:
+                this.activeTransfer.fileSize,
+
+            transferId:
+                this.activeTransfer.transferId,
+
+            publicKey:
+                keyExchange.publicKey,
+
+            isFolderSync:
+                this.activeTransfer.isFolderSync === true,
+
+            relativePath:
+                this.activeTransfer.relativePath || null,
+
+            destinationPath:
+                this.activeTransfer.destinationPath || null
         };
 
         socket.write(
