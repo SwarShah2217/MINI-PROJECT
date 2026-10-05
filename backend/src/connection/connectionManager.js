@@ -230,6 +230,32 @@ class ConnectionManager {
                     console.log(
                         `Unchanged files: ${comparison.unchangedFiles.length}`
                     );
+
+                    const filesToSync = [
+                        ...comparison.newFiles,
+                        ...comparison.modifiedFiles
+                    ];
+
+                    console.log(
+                        `Files selected for sync: ${filesToSync.length}`
+                    );
+
+                    for (const file of filesToSync) {
+
+                        const sourceFilePath =
+                            path.join(
+                                this.pendingFolderSourcePath,
+                                file.relativePath
+                            );
+
+                        console.log(
+                            `Selected for folder sync: ${file.relativePath}`
+                        );
+
+                        console.log(
+                            `Source file path: ${sourceFilePath}`
+                        );
+                    }
                 }
 
 
