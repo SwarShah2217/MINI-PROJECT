@@ -9,6 +9,9 @@ const HashService =
 const EncryptionService =
     require("../security/encryptionService");
 
+const CompressionService =
+    require("../compression/compressionService");
+
 class FileReceiver {
 
     receiveFile(
@@ -66,7 +69,7 @@ class FileReceiver {
             if (transferCompleted) {
                 return;
             }
-
+/*
             if (
                 receivedBytes +
                 chunkData.length >
@@ -80,7 +83,7 @@ class FileReceiver {
                 socket.destroy();
                 return;
             }
-
+*/
 
             let dataToVerify =
                 chunkData;
@@ -160,7 +163,38 @@ class FileReceiver {
                     return;
                 }
             }
+            
+           if (metadata.compressed) {
 
+                try {
+
+                    dataToVerify =
+                        CompressionService.decompressBuffer(
+                            dataToVerify
+                        );
+
+                    console.log(
+                        `Chunk ${metadata.chunkNumber} DECOMPRESSED`
+                    );
+
+                } catch (error) {
+
+                    console.error(
+                        `Chunk ${metadata.chunkNumber} DECOMPRESSION FAILED:`,
+                        error.message
+                    );
+
+                    socket.write(
+                        JSON.stringify({
+                            type: "CHUNK_NACK",
+                            chunkNumber:
+                                metadata.chunkNumber
+                        }) + "\n"
+                    );
+
+                    return;
+                }
+            }
 
             const calculatedHash =
                 HashService.hashBuffer(

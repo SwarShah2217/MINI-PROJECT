@@ -7,7 +7,8 @@ class ChunkProtocol {
         data,
         hash,
         iv = null,
-        authTag = null
+        authTag = null,
+        compressed = false
     ) {
 
         const metadata = {
@@ -17,7 +18,9 @@ class ChunkProtocol {
             hash,
             encrypted:
                 iv !== null &&
-                authTag !== null
+                authTag !== null,
+            compressed:
+                compressed
         };
 
 

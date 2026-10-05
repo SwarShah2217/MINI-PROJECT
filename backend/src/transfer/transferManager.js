@@ -6,6 +6,9 @@ const ChunkProtocol = require("./chunkProtocol");
 const EncryptionService =
     require("../security/encryptionService");
 
+const CompressionService =
+    require("../compression/compressionService");
+
 const SessionKeyManager =
     require("../security/sessionKeyManager");
 
@@ -418,9 +421,15 @@ socket.on("data", (data) => {
                     );
 
 
+                const compressed =
+                    CompressionService.compressBuffer(
+                        dataToSend
+                    );
+
+
                 const encrypted =
                     EncryptionService.encryptBuffer(
-                        dataToSend,
+                        compressed,
                         this.encryptionKey
                     );
 
@@ -431,11 +440,12 @@ socket.on("data", (data) => {
                         encrypted.encryptedData,
                         chunkHash,
                         encrypted.iv,
-                        encrypted.authTag
+                        encrypted.authTag,
+                        true
                     );
 
                 console.log(
-                    `Prepared encrypted chunk ${this.chunkNumber} | Plain: ${bytesRead} bytes | Encrypted: ${encrypted.encryptedData.length} bytes`
+                    `Prepared chunk ${this.chunkNumber} | Original: ${bytesRead} bytes | Compressed: ${compressed.length} bytes | Encrypted: ${encrypted.encryptedData.length} bytes`
                 );
 
                 this.offset += bytesRead;
@@ -535,9 +545,15 @@ socket.on("data", (data) => {
                             );
 
 
+                        const compressed =
+                            CompressionService.compressBuffer(
+                                dataToSend
+                            );
+
+
                         const encrypted =
                             EncryptionService.encryptBuffer(
-                                dataToSend,
+                                compressed,
                                 this.encryptionKey
                             );
 
@@ -548,12 +564,13 @@ socket.on("data", (data) => {
                                 encrypted.encryptedData,
                                 chunkHash,
                                 encrypted.iv,
-                                encrypted.authTag
+                                encrypted.authTag,
+                                true
                             );
 
 
                         console.log(
-                            `Retransmitting encrypted chunk ${chunkNumber} | ${bytesRead} bytes`
+                            `Retransmitting compressed + encrypted chunk ${chunkNumber} | Original: ${bytesRead} bytes | Compressed: ${compressed.length} bytes`
                         );
 
 
