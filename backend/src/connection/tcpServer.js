@@ -85,6 +85,24 @@ class TCPServer {
                             messageText
                         );
 
+                if (message.type === "LAN_CHAT") {
+                    if (this.communicationService) {
+                        this.communicationService.receive(message);
+                    }
+                    continue;
+                }
+
+                if (
+                    message.type === "FILE_TRANSFER_REQUEST" &&
+                    this.communicationService
+                ) {
+                    this.communicationService.addActivity(
+                        "incoming-request",
+                        message.fileName || "Unnamed file"
+                    );
+                }
+
+
                 if (
                     this.connectionManager &&
                     ["FILE_TRANSFER_ACCEPTED","FILE_TRANSFER_REJECTED","FOLDER_SYNC_RESPONSE","FOLDER_SYNC_ERROR"].includes(message.type)

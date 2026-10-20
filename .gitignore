@@ -14,3 +14,8 @@ phase41-update.js
 
 # Local compression test
 backend/test-adaptive-compression.js
+
+# Phase 4.2 temporary files and local data
+*.phase42.bak
+phase42-update.js
+backend/data/

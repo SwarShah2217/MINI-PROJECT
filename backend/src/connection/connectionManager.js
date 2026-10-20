@@ -89,6 +89,24 @@ class ConnectionManager {
                             messageText
                         );
 
+                if (message.type === "LAN_CHAT") {
+                    if (this.communicationService) {
+                        this.communicationService.receive(message);
+                    }
+                    continue;
+                }
+
+                if (
+                    message.type === "FILE_TRANSFER_REQUEST" &&
+                    this.communicationService
+                ) {
+                    this.communicationService.addActivity(
+                        "incoming-request",
+                        message.fileName || "Unnamed file"
+                    );
+                }
+
+
                 if (
                     this.tcpServer &&
                     ["FILE_TRANSFER_REQUEST","FOLDER_SYNC_REQUEST"].includes(message.type)

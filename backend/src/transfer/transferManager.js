@@ -178,7 +178,14 @@ class TransferManager {
             return;
         }
 
-        this.activeTransfer = this.transferQueue.shift();
+        if (this.communicationService && this.transferQueue.length > 0) {
+            const next = this.transferQueue[0];
+            this.communicationService.addActivity(
+                "outgoing-request",
+                next.fileName || "Unnamed file"
+            );
+        }
+this.activeTransfer = this.transferQueue.shift();
         this.activeTransfer.status = "pending";
 
         const keyExchange =

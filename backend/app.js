@@ -26,9 +26,12 @@ const discoveryService = new DiscoveryService();
 const connectionState =
     new ConnectionState();
 
+const CommunicationService = require("./src/chat/communicationService");
 const transferManager =
     new TransferManager(connectionState);
 
+const communicationService = new CommunicationService(connectionState);
+transferManager.communicationService = communicationService;
 // Create the TCP server instance
 const tcpServer =
     new TCPServer(connectionState,transferManager);
@@ -45,9 +48,11 @@ const connectionManager =
 tcpServer.connectionManager = connectionManager;
 connectionManager.tcpServer = tcpServer;
 
+tcpServer.communicationService = communicationService;
+connectionManager.communicationService = communicationService;
 // Give the web server access to TCP connections and discovered devices
 const webServer =
-    new WebServer(tcpServer, discoveryService, connectionManager, transferManager);
+    new WebServer(tcpServer, discoveryService, connectionManager, transferManager, communicationService);
 
 const fileTransferServer =
     new FileTransferServer(

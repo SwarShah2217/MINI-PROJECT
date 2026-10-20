@@ -7,7 +7,7 @@ const FolderScanner =
 
 class WebServer {
 
-    constructor(tcpServer, discoveryService, connectionManager, transferManager) {
+    constructor(tcpServer, discoveryService, connectionManager, transferManager, communicationService) {
 
         // Store TCP server so the webpage can access connection requests
         this.tcpServer = tcpServer;
@@ -16,7 +16,8 @@ class WebServer {
         this.connectionManager = connectionManager;
         this.transferManager = transferManager;
 
-        // Create the local HTTP server
+        this.communicationService = communicationService;
+// Create the local HTTP server
         this.server = http.createServer((req, res) => {
             this.handleRequest(req, res);
         });
@@ -35,7 +36,61 @@ class WebServer {
     // Handle requests coming from the browser
     handleRequest(req, res) {
 
-        // Check whether there is a pending TCP connection request
+        
+        // Phase 4.2: LAN chat and activity APIs.
+        if (req.method === "GET" && req.url === "/api/chat/messages") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                messages: this.communicationService.getMessages()
+            }));
+            return;
+        }
+
+        if (req.method === "GET" && req.url === "/api/activity") {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+                activity: this.communicationService.getActivity()
+            }));
+            return;
+        }
+
+        if (req.method === "POST" && req.url === "/api/chat/send") {
+            let body = "";
+            let tooLarge = false;
+
+            req.on("data", chunk => {
+                body += chunk.toString();
+                if (body.length > 8192) {
+                    tooLarge = true;
+                    req.destroy();
+                }
+            });
+
+            req.on("end", () => {
+                if (tooLarge) return;
+
+                try {
+                    const data = JSON.parse(body);
+                    const result = this.communicationService.send(data.text);
+
+                    res.writeHead(result.success ? 200 : 400, {
+                        "Content-Type": "application/json"
+                    });
+                    res.end(JSON.stringify(result));
+                } catch {
+                    res.writeHead(400, {
+                        "Content-Type": "application/json"
+                    });
+                    res.end(JSON.stringify({
+                        success: false,
+                        error: "Invalid request"
+                    }));
+                }
+            });
+            return;
+        }
+
+// Check whether there is a pending TCP connection request
         if (
             req.url === "/api/connection/pending" &&
             req.method === "GET"
@@ -577,6 +632,13 @@ class WebServer {
             filePath = path.join(
                 __dirname,
                 "../../../frontend/script.js"
+            );
+
+        } else if (req.url === "/phase42.js") {
+
+            filePath = path.join(
+                __dirname,
+                "../../../frontend/phase42.js"
             );
 
         } else {
