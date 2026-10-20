@@ -41,6 +41,10 @@ const connectionManager =
         transferManager
     );
 
+// Allow either connected peer to send or receive requests.
+tcpServer.connectionManager = connectionManager;
+connectionManager.tcpServer = tcpServer;
+
 // Give the web server access to TCP connections and discovered devices
 const webServer =
     new WebServer(tcpServer, discoveryService, connectionManager, transferManager);

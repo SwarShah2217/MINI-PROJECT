@@ -24,6 +24,7 @@ class TCPServer {
 
         // No file transfer request is pending initially
         this.pendingFileRequest = null;
+        this.connectionManager = null;
     }
 
 
@@ -83,6 +84,17 @@ class TCPServer {
                         JSON.parse(
                             messageText
                         );
+
+                if (
+                    this.connectionManager &&
+                    ["FILE_TRANSFER_ACCEPTED","FILE_TRANSFER_REJECTED","FOLDER_SYNC_RESPONSE","FOLDER_SYNC_ERROR"].includes(message.type)
+                ) {
+                    this.connectionManager.handlePeerResponse(
+                        message,
+                        peerIp
+                    );
+                    continue;
+                }
 
                 if (message.type === "CONNECTION_REQUEST") {
 
@@ -412,6 +424,114 @@ class TCPServer {
         this.pendingFileRequest = null;
 
         return true;
+    }
+    handlePeerRequest(message, socket, peerIp) {
+        for (let once = 0; once < 1; once++) {
+if (message.type === "FILE_TRANSFER_REQUEST") {
+
+                    console.log(
+                        `Incoming file request: ${message.fileName} (${message.fileSize} bytes)`
+                    );
+
+                    this.pendingFileRequest = {
+
+                        fileName:
+                            message.fileName,
+
+                        fileSize:
+                            message.fileSize,
+
+                        transferId:
+                            message.transferId,
+
+                        senderPublicKey:
+                            message.publicKey,
+
+                        isFolderSync:
+                            message.isFolderSync === true,
+
+                        relativePath:
+                            message.relativePath || null,
+
+                        destinationPath:
+                            message.destinationPath || null,
+
+                        socket:
+                            socket
+                    };
+
+                    if (this.pendingFileRequest.isFolderSync) {
+
+                        console.log(
+                            `Folder sync file request: ${this.pendingFileRequest.relativePath}`
+                        );
+
+                        console.log(
+                            `Folder sync destination: ${this.pendingFileRequest.destinationPath}`
+                        );
+                    }
+                }
+if (
+                    message.type ===
+                    "FOLDER_SYNC_REQUEST"
+                ) {
+
+                    console.log(
+                        "Folder sync request received"
+                    );
+
+
+                    const destinationPath =
+                        message.destinationPath;
+
+
+                    FolderScanner
+                        .scanFolder(
+                            destinationPath
+                        )
+                        .then(
+                            (destinationManifest) => {
+
+                                socket.write(
+                                    JSON.stringify({
+                                        type:
+                                            "FOLDER_SYNC_RESPONSE",
+
+                                        destinationManifest:
+                                            destinationManifest
+
+                                    }) + "\n"
+                                );
+
+
+                                console.log(
+                                    `Folder manifest sent: ${destinationManifest.length} files`
+                                );
+                            }
+                        )
+                        .catch(
+                            (error) => {
+
+                                console.error(
+                                    "Could not scan destination folder:",
+                                    error.message
+                                );
+
+
+                                socket.write(
+                                    JSON.stringify({
+                                        type:
+                                            "FOLDER_SYNC_ERROR",
+
+                                        message:
+                                            error.message
+
+                                    }) + "\n"
+                                );
+                            }
+                        );
+                }
+        }
     }
 }
 

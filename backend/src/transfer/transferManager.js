@@ -537,9 +537,16 @@ socket.on("data", (data) => {
                     );
 
 
+                const useCompression =
+                    compressed.length < dataToSend.length;
+
+                const payload = useCompression
+                    ? compressed
+                    : dataToSend;
+
                 const encrypted =
                     EncryptionService.encryptBuffer(
-                        compressed,
+                        payload,
                         this.encryptionKey
                     );
 
@@ -551,7 +558,7 @@ socket.on("data", (data) => {
                         chunkHash,
                         encrypted.iv,
                         encrypted.authTag,
-                        true
+                        useCompression
                     );
 
                 console.log(
@@ -661,9 +668,16 @@ socket.on("data", (data) => {
                             );
 
 
+                        const useCompression =
+                            compressed.length < dataToSend.length;
+
+                        const payload = useCompression
+                            ? compressed
+                            : dataToSend;
+
                         const encrypted =
                             EncryptionService.encryptBuffer(
-                                compressed,
+                                payload,
                                 this.encryptionKey
                             );
 
@@ -675,7 +689,7 @@ socket.on("data", (data) => {
                                 chunkHash,
                                 encrypted.iv,
                                 encrypted.authTag,
-                                true
+                                useCompression
                             );
 
 
