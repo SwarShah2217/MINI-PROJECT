@@ -263,42 +263,11 @@ class ConnectionManager {
                         `Unchanged files: ${comparison.unchangedFiles.length}`
                     );
 
-                    const filesToSync = [
-                        ...comparison.newFiles,
-                        ...comparison.modifiedFiles
-                    ];
+                    // PHASE43: preview only; never queue before confirmation.
+                    this.phase43PreviewReady = true;
+                    this.phase43PreviewError = null;
+                    this.pendingFolderManifest = this.phase43SourceManifest;
 
-                    console.log(
-                        `Files selected for sync: ${filesToSync.length}`
-                    );
-
-                    for (const file of filesToSync) {
-
-                        const sourceFilePath =
-                            path.join(
-                                this.pendingFolderSourcePath,
-                                file.relativePath
-                            );
-
-                        console.log(
-                            `Queueing folder sync file: ${file.relativePath}`
-                        );
-
-                        const queued =
-                            this.transferManager
-                                .sendFileFromPath(
-                                    sourceFilePath,
-                                    file.relativePath,
-                                    this.pendingFolderDestinationPath
-                                );
-
-                        if (!queued) {
-
-                            console.error(
-                                `Could not queue folder sync file: ${file.relativePath}`
-                            );
-                        }
-                    }
                 }
 
 
@@ -377,6 +346,9 @@ class ConnectionManager {
         }
 
 
+        this.phase43SourceManifest = sourceManifest;
+        this.phase43PreviewReady = false;
+        this.phase43PreviewError = null;
         this.pendingFolderManifest =
             sourceManifest;
 
@@ -532,42 +504,11 @@ if (
                         `Unchanged files: ${comparison.unchangedFiles.length}`
                     );
 
-                    const filesToSync = [
-                        ...comparison.newFiles,
-                        ...comparison.modifiedFiles
-                    ];
+                    // PHASE43: preview only; never queue before confirmation.
+                    this.phase43PreviewReady = true;
+                    this.phase43PreviewError = null;
+                    this.pendingFolderManifest = this.phase43SourceManifest;
 
-                    console.log(
-                        `Files selected for sync: ${filesToSync.length}`
-                    );
-
-                    for (const file of filesToSync) {
-
-                        const sourceFilePath =
-                            path.join(
-                                this.pendingFolderSourcePath,
-                                file.relativePath
-                            );
-
-                        console.log(
-                            `Queueing folder sync file: ${file.relativePath}`
-                        );
-
-                        const queued =
-                            this.transferManager
-                                .sendFileFromPath(
-                                    sourceFilePath,
-                                    file.relativePath,
-                                    this.pendingFolderDestinationPath
-                                );
-
-                        if (!queued) {
-
-                            console.error(
-                                `Could not queue folder sync file: ${file.relativePath}`
-                            );
-                        }
-                    }
                 }
 if (
                     message.type ===

@@ -153,6 +153,9 @@ async function loadConnectionStatus() {
             sourceFolderPath.disabled = false;
             destinationFolderPath.disabled = false;
             syncFolderButton.disabled = false;
+            if (window.phase43SetConnected) {
+                window.phase43SetConnected(true);
+            }
 
             if (
                 folderSyncStatus.textContent ===
@@ -284,6 +287,10 @@ async function loadConnectionStatus() {
             sourceFolderPath.disabled = true;
             destinationFolderPath.disabled = true;
             syncFolderButton.disabled = true;
+
+            if (window.phase43SetConnected) {
+                window.phase43SetConnected(false);
+            }
 
             folderSyncStatus.textContent =
                 "Connect to a device to synchronize folders.";
@@ -796,7 +803,7 @@ async function loadFolderSyncStatus() {
 
 
         folderSyncStatus.textContent =
-            `Sync complete — ` +
+            `Preview ready — ` +
             `New: ${comparison.newFiles.length}, ` +
             `Modified: ${comparison.modifiedFiles.length}, ` +
             `Unchanged: ${comparison.unchangedFiles.length}`;

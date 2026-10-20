@@ -88,9 +88,40 @@
             disabled
         >
 
-        <button id="syncFolderButton" disabled>
+        <button id="syncFolderButton"
+                disabled
+                style="display:none">
             Sync Folder
         </button>
+
+        <button id="phase43PreviewButton" disabled>
+            Preview Changes
+        </button>
+
+        <div id="phase43Panel"
+             style="display:none;margin-top:12px">
+
+            <p id="phase43Counts"></p>
+
+            <div id="phase43Files"
+                 style="max-height:260px;
+                        overflow:auto;
+                        border:1px solid #999;
+                        padding:10px">
+            </div>
+
+            <button id="phase43Whole">
+                Confirm Whole Folder Sync
+            </button>
+
+            <button id="phase43Selected">
+                Confirm Selected Files
+            </button>
+        </div>
+
+        <h3>Sync History</h3>
+
+        <div id="phase43History"></div>
 
         <p id="folderSyncStatus">
             Connect to a device to synchronize folders.
@@ -139,6 +170,7 @@
     <script src="script.js"></script>
     <script src="phase42.js"></script>
 
+<script src="/phase43.js"></script>
 </body>
 
 </html>

@@ -4,6 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 const FolderScanner =
     require("../sync/folderScanner");
+const SyncHistory = require("../sync/syncHistory");
 
 class WebServer {
 
@@ -17,6 +18,38 @@ class WebServer {
         this.transferManager = transferManager;
 
         this.communicationService = communicationService;
+
+        this.phase43History = new SyncHistory();
+        this.phase43PreviewId = null;
+
+        transferManager.phase43History =
+            this.phase43History;
+
+        transferManager.phase43HistoryFileVerified =
+            (id, rel) => {
+                const entry =
+                    this.phase43History.entries.find(
+                        e => e.id === id
+                    );
+
+                if (!entry) return;
+
+                const verified = [
+                    ...new Set([
+                        ...(entry.verifiedFiles || []),
+                        rel
+                    ])
+                ];
+
+                this.phase43History.update(id, {
+                    verifiedFiles: verified,
+                    status:
+                        verified.length ===
+                        entry.selectedFiles.length
+                            ? "completed"
+                            : "transferring"
+                });
+            };
 // Create the local HTTP server
         this.server = http.createServer((req, res) => {
             this.handleRequest(req, res);
@@ -37,6 +70,341 @@ class WebServer {
     handleRequest(req, res) {
 
         
+
+        // PHASE43_API: preview, confirm, history.
+
+        if (
+            req.url === "/api/sync/history" &&
+            req.method === "GET"
+        ) {
+            res.writeHead(200, {
+                "Content-Type": "application/json"
+            });
+
+            res.end(JSON.stringify({
+                entries: this.phase43History.list()
+            }));
+
+            return;
+        }
+
+        if (
+            req.url === "/api/sync/preview-status" &&
+            req.method === "GET"
+        ) {
+            const cm = this.connectionManager;
+
+            res.writeHead(200, {
+                "Content-Type": "application/json"
+            });
+
+            res.end(JSON.stringify({
+                ready: !!cm.phase43PreviewReady,
+                error: cm.phase43PreviewError || null,
+                previewId: this.phase43PreviewId || null,
+                comparison: cm.phase43PreviewReady
+                    ? cm.lastFolderComparison
+                    : null
+            }));
+
+            return;
+        }
+
+        if (
+            (
+                req.url === "/api/sync/preview" ||
+                req.url === "/api/sync/confirm"
+            ) &&
+            req.method === "POST"
+        ) {
+            let body = "";
+            let tooLarge = false;
+
+            req.on("data", c => {
+                body += c;
+
+                if (body.length > 1048576) {
+                    tooLarge = true;
+                    req.destroy();
+                }
+            });
+
+            req.on("end", async () => {
+                const send = (code, obj) => {
+                    res.writeHead(code, {
+                        "Content-Type": "application/json"
+                    });
+
+                    res.end(JSON.stringify(obj));
+                };
+
+                try {
+                    if (tooLarge) {
+                        throw Error("Request too large");
+                    }
+
+                    const data = JSON.parse(body);
+                    const cm = this.connectionManager;
+
+                    if (req.url === "/api/sync/preview") {
+                        if (
+                            !data.sourcePath ||
+                            !data.destinationPath
+                        ) {
+                            throw Error(
+                                "Both folder paths required"
+                            );
+                        }
+
+                        if (
+                            cm.connectionState.status !==
+                            "connected"
+                        ) {
+                            throw Error(
+                                "Connect to a peer first"
+                            );
+                        }
+
+                        const manifest =
+                            await FolderScanner.scanFolder(
+                                data.sourcePath
+                            );
+
+                        const id = crypto.randomUUID();
+
+                        const ok =
+                            cm.sendFolderSyncRequest(
+                                manifest,
+                                data.sourcePath,
+                                data.destinationPath
+                            );
+
+                        if (!ok) {
+                            throw Error(
+                                "Could not send folder preview request"
+                            );
+                        }
+
+                        this.phase43PreviewId = id;
+
+                        this.phase43History.add({
+                            type: "preview",
+                            status: "requested",
+                            sourcePath: data.sourcePath,
+                            destinationPath:
+                                data.destinationPath,
+                            totalFiles: manifest.length,
+                            previewId: id
+                        });
+
+                        send(200, {
+                            success: true,
+                            previewId: id,
+                            sourceFiles: manifest.length
+                        });
+
+                        return;
+                    }
+
+                    if (
+                        !this.phase43PreviewId ||
+                        data.previewId !==
+                            this.phase43PreviewId ||
+                        !cm.phase43PreviewReady
+                    ) {
+                        throw Error(
+                            "Preview missing, stale, or not ready"
+                        );
+                    }
+
+                    if (
+                        cm.connectionState.status !==
+                        "connected"
+                    ) {
+                        throw Error("Peer disconnected");
+                    }
+
+                    const comparison =
+                        cm.lastFolderComparison;
+
+                    const changed = [
+                        ...comparison.newFiles,
+                        ...comparison.modifiedFiles
+                    ];
+
+                    const allowed = new Map(
+                        changed.map(f => [
+                            f.relativePath,
+                            f
+                        ])
+                    );
+
+                    const selected =
+                        data.mode === "whole"
+                            ? changed.map(
+                                f => f.relativePath
+                            )
+                            : data.selectedPaths;
+
+                    if (
+                        data.mode !== "whole" &&
+                        data.mode !== "selective"
+                    ) {
+                        throw Error("Invalid sync mode");
+                    }
+
+                    if (
+                        !Array.isArray(selected) ||
+                        selected.some(
+                            p =>
+                                typeof p !== "string" ||
+                                !allowed.has(p)
+                        )
+                    ) {
+                        throw Error(
+                            "Invalid selected paths"
+                        );
+                    }
+
+                    const unique = [
+                        ...new Set(selected)
+                    ];
+
+                    const root = path.resolve(
+                        cm.pendingFolderSourcePath
+                    );
+
+                    // Verify files have not changed
+                    // since the preview.
+
+                    for (const rel of unique) {
+                        const full = path.resolve(
+                            root,
+                            rel
+                        );
+
+                        if (
+                            !full.startsWith(
+                                root + path.sep
+                            )
+                        ) {
+                            throw Error(
+                                "Unsafe relative path"
+                            );
+                        }
+
+                        const actual =
+                            await require(
+                                "../integrity/hashService"
+                            ).hashFile(full);
+
+                        if (
+                            actual !==
+                            allowed.get(rel).hash
+                        ) {
+                            throw Error(
+                                "Source changed after preview: " +
+                                rel
+                            );
+                        }
+                    }
+
+                    const entry =
+                        this.phase43History.add({
+                            type: "sync",
+                            status: unique.length
+                                ? "queued"
+                                : "no-changes",
+                            mode: data.mode,
+                            sourcePath: root,
+                            destinationPath:
+                                cm.pendingFolderDestinationPath,
+                            selectedFiles: unique,
+                            verifiedFiles: [],
+                            failedFiles: []
+                        });
+
+                    let queued = 0;
+
+                    for (const rel of unique) {
+                        const full = path.resolve(
+                            root,
+                            rel
+                        );
+
+                        const ok =
+                            this.transferManager
+                                .sendFileFromPath(
+                                    full,
+                                    rel,
+                                    cm.pendingFolderDestinationPath
+                                );
+
+                        if (ok) {
+                            queued++;
+
+                            const active =
+                                this.transferManager
+                                    .activeTransfer;
+
+                            if (
+                                active &&
+                                active.filePath === full &&
+                                !active.phase43HistoryId
+                            ) {
+                                active.phase43HistoryId =
+                                    entry.id;
+                            }
+
+                            for (
+                                const t of
+                                this.transferManager
+                                    .transferQueue
+                            ) {
+                                if (
+                                    t.filePath === full &&
+                                    !t.phase43HistoryId
+                                ) {
+                                    t.phase43HistoryId =
+                                        entry.id;
+                                }
+                            }
+                        }
+                    }
+
+                    this.phase43History.update(
+                        entry.id,
+                        {
+                            status:
+                                queued === unique.length
+                                    ? entry.status
+                                    : "partially-queued",
+                            queuedFiles: queued
+                        }
+                    );
+
+                    this.phase43PreviewId = null;
+                    cm.phase43PreviewReady = false;
+
+                    send(200, {
+                        success: true,
+                        historyId: entry.id,
+                        queued,
+                        requested: unique.length
+                    });
+
+                    return;
+                } catch (e) {
+                    send(400, {
+                        success: false,
+                        message: e.message
+                    });
+                }
+            });
+
+            return;
+        }
+
         // Phase 4.2: LAN chat and activity APIs.
         if (req.method === "GET" && req.url === "/api/chat/messages") {
             res.writeHead(200, { "Content-Type": "application/json" });
@@ -634,6 +1002,11 @@ class WebServer {
                 "../../../frontend/script.js"
             );
 
+        } else if (req.url === "/phase43.js") {
+            filePath = path.join(
+                __dirname,
+                "../../../frontend/phase43.js"
+            );
         } else if (req.url === "/phase42.js") {
 
             filePath = path.join(

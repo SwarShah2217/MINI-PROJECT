@@ -344,6 +344,19 @@ socket.on("data", (data) => {
                 "Receiver confirmed file transfer is complete"
             );
 
+            // PHASE43: receiver has verified
+            // the complete file SHA-256.
+            if (
+                this.activeTransfer &&
+                this.activeTransfer.phase43HistoryId &&
+                this.phase43History
+            ) {
+                this.phase43HistoryFileVerified(
+                    this.activeTransfer.phase43HistoryId,
+                    this.activeTransfer.relativePath
+                );
+            }
+
             this.cleanupTemporaryFile();
 
             socket.end();
