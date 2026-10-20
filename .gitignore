@@ -1,2 +1,16 @@
 backend/downloads/
 backend/temp/
+
+# Phase 4 development backups
+*.phase3.bak
+
+# Temporary test folders
+final-sync-source/
+final-sync-destination/
+phase41-test/
+
+# One-time update script
+phase41-update.js
+
+# Local compression test
+backend/test-adaptive-compression.js
