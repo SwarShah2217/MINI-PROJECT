@@ -14,6 +14,32 @@ const CompressionService =
 
 class FileReceiver {
 
+    // PHASE44B_CHECKPOINT_V1
+    static saveCheckpoint(checkpointPath, state) {
+        if (!checkpointPath) return;
+
+        const tempPath = checkpointPath + ".tmp";
+
+        fs.writeFileSync(
+            tempPath,
+            JSON.stringify(state, null, 2),
+            { encoding: "utf8", mode: 0o600 }
+        );
+
+        fs.renameSync(tempPath, checkpointPath);
+    }
+
+    static removeCheckpoint(checkpointPath) {
+        if (!checkpointPath) return;
+
+        try {
+            fs.unlinkSync(checkpointPath);
+        } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+        }
+    }
+
+
     receiveFile(
         socket,
         fileName,
@@ -145,6 +171,65 @@ class FileReceiver {
 
         
 
+
+        // Phase 4.4B checkpoints currently apply to regular
+        // downloads only. Folder-sync semantics are unchanged.
+        const checkpointEnabled =
+            !isFolderSync &&
+            typeof transferId === "string" &&
+            transferId.length > 0;
+
+        const checkpointDirectory = path.join(
+            __dirname,
+            "../../downloads/.checkpoints"
+        );
+
+        if (checkpointEnabled) {
+            fs.mkdirSync(
+                checkpointDirectory,
+                { recursive: true }
+            );
+        }
+
+        // Hash the transfer ID so untrusted IDs cannot become paths.
+        const crypto = require("crypto");
+        const checkpointName = checkpointEnabled
+            ? crypto.createHash("sha256")
+                .update(transferId)
+                .digest("hex") + ".json"
+            : null;
+
+        const checkpointPath = checkpointEnabled
+            ? path.join(checkpointDirectory, checkpointName)
+            : null;
+
+        const checkpoint = checkpointEnabled
+            ? {
+                version: 1,
+                status: "receiving",
+                transferId,
+                fileName: path.basename(fileName),
+                fileSize,
+                fileHash,
+                filePath,
+                chunkSize: 64 * 1024,
+                verifiedChunks: {},
+                verifiedBytes: 0,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            }
+            : null;
+
+        // This step does not reuse an older partial file.
+        // Step 4.4B.3 will add validated resume negotiation.
+        if (checkpointPath && fs.existsSync(checkpointPath)) {
+            throw new Error(
+                "An existing interrupted checkpoint was found " +
+                "for this transfer ID. Resume support is not " +
+                "installed yet; refusing to overwrite it."
+            );
+        }
+
         const fileDescriptor =
         fs.openSync(
             filePath,
@@ -153,6 +238,13 @@ class FileReceiver {
 
         let receivedBytes = 0;
         let transferCompleted = false;
+
+        if (checkpoint) {
+            FileReceiver.saveCheckpoint(
+                checkpointPath,
+                checkpoint
+            );
+        }
 
         const parseChunk = 
             ChunkProtocol.createParser(
@@ -329,13 +421,6 @@ class FileReceiver {
                 `Chunk ${metadata.chunkNumber} SHA-256 VERIFIED`
             );
 
-            socket.write(
-                JSON.stringify({
-                    type: "CHUNK_ACK",
-                    chunkNumber: metadata.chunkNumber
-                }) + "\n"
-            );
-
             const chunkPosition =
                 metadata.chunkNumber *
                 (64 * 1024);
@@ -351,6 +436,36 @@ class FileReceiver {
 
             receivedBytes +=
                 dataToVerify.length;
+
+
+            if (checkpoint) {
+                // Ensure the verified bytes reach the file before
+                // recording them in the persistent checkpoint.
+                fs.fsyncSync(fileDescriptor);
+
+                checkpoint.verifiedChunks[
+                    String(metadata.chunkNumber)
+                ] = {
+                    size: dataToVerify.length,
+                    hash: calculatedHash
+                };
+
+                checkpoint.verifiedBytes = receivedBytes;
+                checkpoint.updatedAt =
+                    new Date().toISOString();
+
+                FileReceiver.saveCheckpoint(
+                    checkpointPath,
+                    checkpoint
+                );
+            }
+
+            socket.write(
+                JSON.stringify({
+                    type: "CHUNK_ACK",
+                    chunkNumber: metadata.chunkNumber
+                }) + "\n"
+            );
 
 
             console.log(
@@ -436,6 +551,10 @@ class FileReceiver {
                         "FINAL FILE SHA-256 VERIFICATION FAILED"
                     );
 
+                    FileReceiver.removeCheckpoint(
+                        checkpointPath
+                    );
+
 
                     fs.unlink(
                         filePath,
@@ -464,6 +583,10 @@ class FileReceiver {
 
                 console.log(
                     "FINAL FILE SHA-256 VERIFIED"
+                );
+
+                FileReceiver.removeCheckpoint(
+                    checkpointPath
                 );
 
 
@@ -521,18 +644,45 @@ class FileReceiver {
                 }
 
 
-                fs.unlink(
-                    filePath,
-                    (error) => {
+                if (checkpoint) {
+                    checkpoint.status = "interrupted";
+                    checkpoint.updatedAt =
+                        new Date().toISOString();
 
-                        if (!error) {
+                    try {
+                        FileReceiver.saveCheckpoint(
+                            checkpointPath,
+                            checkpoint
+                        );
 
-                            console.log(
-                                `Deleted partially downloaded file: ${filePath}`
-                            );
-                        }
+                        console.log(
+                            "Phase 4.4B: Interrupted file preserved:",
+                            filePath
+                        );
+
+                        console.log(
+                            "Phase 4.4B: Checkpoint:",
+                            checkpointPath
+                        );
+                    } catch (error) {
+                        console.error(
+                            "Could not save interrupted checkpoint:",
+                            error.message
+                        );
                     }
-                );
+                } else {
+                    // Preserve original folder-sync cleanup behavior.
+                    fs.unlink(
+                        filePath,
+                        (error) => {
+                            if (!error) {
+                                console.log(
+                                    `Deleted partially downloaded file: ${filePath}`
+                                );
+                            }
+                        }
+                    );
+                }
             }
         };
 
