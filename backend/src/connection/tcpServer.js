@@ -7,6 +7,8 @@ const KeyExchangeService =
 
 const FolderScanner =
     require("../sync/folderScanner");
+const { verifyCheckpoint } =
+    require("../transfer/resumeCheckpoint");
 
 class TCPServer {
 
@@ -267,6 +269,9 @@ class TCPServer {
                         senderPublicKey:
                             message.publicKey,
 
+                        resume:
+                            message.resume === true,
+
                         isFolderSync:
                             message.isFolderSync === true,
 
@@ -382,6 +387,10 @@ class TCPServer {
                 console.log("Peer connection closed");
 
                 this.connectionState.reset();
+                const transfer = this.transferManager.activeTransfer;
+                if (transfer?.status === "pending" && transfer.controlSocket === socket) {
+                    this.transferManager.finishTransfer("interrupted", transfer);
+                }
             }
         });
 
@@ -462,11 +471,68 @@ class TCPServer {
     }
 
     acceptFileTransfer() {
+        this.lastFileTransferError = null;
         if (!this.pendingFileRequest) {
             console.log("No pending file transfer request");
+            this.lastFileTransferError = "No pending file transfer request";
+            return false;
+        }
+        // PHASE44B_RESUME_REQUEST_GUARD_V1
+        if (
+            this.pendingFileRequest.resume === true &&
+            this.pendingFileRequest.isFolderSync === true
+        ) {
+            console.error(
+                "Folder sync resume is not supported"
+            );
+            this.lastFileTransferError = "Folder sync resume is not supported";
+
             return false;
         }
 
+        // PHASE44B_RESUME_CHECKPOINT_GUARD_V1
+        if (this.pendingFileRequest.resume === true) {
+            try {
+                const request = this.pendingFileRequest;
+
+                if (
+                    typeof request.transferId !== "string" ||
+                    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.transferId) ||
+                    typeof request.fileName !== "string" ||
+                    !request.fileName ||
+                    !Number.isSafeInteger(request.fileSize) ||
+                    request.fileSize <= 0
+                ) {
+                    throw new Error("Invalid resume request metadata");
+                }
+
+                const checkpoint = verifyCheckpoint(
+                    request.transferId,
+                    {
+                        fileName: request.fileName,
+                        fileSize: request.fileSize
+                    }
+                );
+
+                if (!checkpoint) {
+                    throw new Error(
+                        "No checkpoint available for this transfer"
+                    );
+                }
+
+                console.log(
+                    `Resume checkpoint accepted: ${checkpoint.verifiedBytes} verified bytes`
+                );
+            } catch (error) {
+                console.error(
+                    "Resume request rejected:",
+                    error.message
+                );
+                this.lastFileTransferError = error.message;
+
+                return false;
+            }
+        }
         const socket = this.pendingFileRequest.socket;
 
         const transferId =
@@ -535,7 +601,8 @@ class TCPServer {
 
         socket.write(
             JSON.stringify({
-                type: "FILE_TRANSFER_REJECTED"
+                type: "FILE_TRANSFER_REJECTED",
+                transferId: this.pendingFileRequest.transferId
             }) + "\n"
         );
 
@@ -568,6 +635,9 @@ if (message.type === "FILE_TRANSFER_REQUEST") {
 
                         senderPublicKey:
                             message.publicKey,
+
+                        resume:
+                            message.resume === true,
 
                         isFolderSync:
                             message.isFolderSync === true,

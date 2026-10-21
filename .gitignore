@@ -19,3 +19,48 @@ backend/test-adaptive-compression.js
 *.phase42.bak
 phase42-update.js
 backend/data/
+
+# Dependencies, generated output and machine-local configuration
+node_modules/
+coverage/
+test-results/
+playwright-report/
+*.log
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+.aws/
+.ssh/
+.codex/
+.agents/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Recovery state and local safety copies must never be published
+**/.checkpoints/
+/.phase*-backup-*/
+/.phase44b-resume-safety/
+*.bak
+
+# One-off migration/review artifacts (not application source)
+/phase*-update.js
+/phase44b-step*.js
+/phase44b-resume-receiver.js
+/phase44b-*-diff.txt
+/phase44b-review.txt
+/.zip
+
+# Local handoff/incident notes include PC-specific paths and recovery metadata.
+# Portable project documentation lives in README.md and docs/.
+/DEVELOPMENT_LOG.md
+/project_status.md
+/agents.md
+/PC2_READ_ONLY_INSPECTION.ps1
+/UI_TEST_GUIDE.md
+/VALIDATION.md

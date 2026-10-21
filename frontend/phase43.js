@@ -11,10 +11,43 @@
     let previewId = null;
     let comparison = null;
     let loading = false;
+    let peerConnected = false;
+    let peerIp = null;
+    let submitting = false;
+    let epoch = 0;
+    let previewPaths = null;
 
-    window.phase43SetConnected = connected => {
-        button.disabled = !connected || loading;
+    function updateButtons() {
+        button.disabled = !peerConnected || loading || submitting;
+        for (const id of ["phase43Whole", "phase43Selected"]) {
+            $(id).disabled = !peerConnected || !comparison || loading || submitting;
+        }
+    }
+
+    function invalidatePreview(message) {
+        const hadPreview = previewId || loading || comparison;
+        epoch++;
+        previewId = null;
+        comparison = null;
+        previewPaths = null;
+        loading = false;
+        panel.style.display = "none";
+        if (hadPreview) status.textContent = message;
+        updateButtons();
+    }
+
+    window.phase43SetConnected = (connected, nextPeerIp = null) => {
+        const changedPeer = peerConnected && connected && peerIp !== nextPeerIp;
+        peerConnected = connected;
+        peerIp = nextPeerIp;
+        if (!connected || changedPeer) invalidatePreview("Connection changed. Preview again before confirming a sync.");
+        updateButtons();
     };
+
+    for (const id of ["sourceFolderPath", "destinationFolderPath"]) {
+        $(id).addEventListener("input", () => invalidatePreview("Folder paths changed. Preview again before confirming."));
+    }
+    updateButtons();
 
     async function request(url, body) {
         const r = await fetch(url, {
@@ -27,7 +60,7 @@
 
         const d = await r.json();
 
-        if (!r.ok) {
+        if (!r.ok || d.success === false) {
             throw Error(
                 d.message || "Request failed"
             );
@@ -37,10 +70,11 @@
     }
 
     button.addEventListener("click", async () => {
-        if (loading) return;
+        if (!peerConnected || loading || submitting) return;
 
         loading = true;
-        button.disabled = true;
+        updateButtons();
+        const requestEpoch = ++epoch;
         panel.style.display = "none";
 
         previewId = null;
@@ -52,6 +86,8 @@
 
             const destinationPath =
                 $("destinationFolderPath").value.trim();
+            if (!sourcePath || !destinationPath) throw Error("Enter both folder paths before previewing.");
+            previewPaths = [sourcePath, destinationPath];
 
             const d = await request(
                 "/api/sync/preview",
@@ -60,15 +96,17 @@
                     destinationPath
                 }
             );
+            if (requestEpoch !== epoch) return;
 
             previewId = d.previewId;
 
             status.textContent =
                 "Waiting for peer folder comparison...";
         } catch (e) {
+            if (requestEpoch !== epoch) return;
             status.textContent = e.message;
             loading = false;
-            button.disabled = false;
+            updateButtons();
         }
     });
 
@@ -94,7 +132,7 @@
                 const label =
                     document.createElement("label");
 
-                label.style.display = "block";
+                label.className = "sync-file";
 
                 const input =
                     document.createElement("input");
@@ -129,25 +167,35 @@
         status.textContent =
             "Preview ready. No files have been " +
             "transferred. Choose a confirmation button.";
+        updateButtons();
     }
 
     async function confirm(mode) {
-        if (!previewId || !comparison) return;
+        if (!peerConnected || !previewId || !comparison || loading || submitting) return;
+        const paths = [$("sourceFolderPath").value.trim(), $("destinationFolderPath").value.trim()];
+        if (!previewPaths || paths.some((value, index) => value !== previewPaths[index])) {
+            invalidatePreview("Folder paths changed. Preview again before confirming.");
+            return;
+        }
 
         const selectedPaths = [
             ...document.querySelectorAll(
                 ".phase43-check:checked"
             )
         ].map(el => el.value);
+        const count = mode === "whole" ? comparison.newFiles.length + comparison.modifiedFiles.length : selectedPaths.length;
+        if (!count) { status.textContent = "Choose at least one new or modified file to sync."; return; }
 
         const message =
             mode === "whole"
-                ? "Sync ALL new and modified files?"
+                ? "Sync ALL " + count + " new and modified files to " + paths[1] + " on " + (peerIp || "the connected peer") + "?"
                 : "Sync " +
                   selectedPaths.length +
-                  " selected files?";
+                  " selected files to " + paths[1] + " on " + (peerIp || "the connected peer") + "?";
 
         if (!window.confirm(message)) return;
+        submitting = true;
+        updateButtons();
 
         try {
             const d = await request(
@@ -175,6 +223,9 @@
             refreshHistory();
         } catch (e) {
             status.textContent = e.message;
+        } finally {
+            submitting = false;
+            updateButtons();
         }
     }
 
@@ -199,13 +250,18 @@
 
             target.replaceChildren();
 
+            if (!d.entries.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty-state";
+                empty.textContent = "No folder syncs yet. Start with a preview above.";
+                target.append(empty);
+            }
+
             for (const entry of d.entries.slice(0, 12)) {
                 const div =
                     document.createElement("div");
 
-                div.style.padding = "4px";
-                div.style.borderBottom =
-                    "1px solid #aaa";
+                div.className = "history-item";
 
                 div.textContent =
                     new Date(entry.at)
@@ -231,13 +287,17 @@
     }
 
     async function poll() {
+        const pollEpoch = epoch;
         try {
             if (previewId && loading) {
+                const requestEpoch = epoch;
                 const r = await fetch(
                     "/api/sync/preview-status"
                 );
 
                 const d = await r.json();
+                if (requestEpoch !== epoch) return;
+                if (!r.ok) throw Error(d.message || "Folder comparison unavailable");
 
                 if (
                     d.previewId === previewId &&
@@ -245,20 +305,24 @@
                 ) {
                     comparison = d.comparison;
                     loading = false;
-                    button.disabled = false;
+                    updateButtons();
 
                     render();
                 } else if (d.error) {
                     loading = false;
-                    button.disabled = false;
+                    updateButtons();
                     status.textContent = d.error;
                 }
             }
         } catch (e) {
-            console.warn(
-                "Preview polling failed",
-                e
-            );
+            if (pollEpoch === epoch) {
+                loading = false;
+                previewId = null;
+                comparison = null;
+                previewPaths = null;
+                status.textContent = "Folder preview failed: " + e.message + ". Preview again before confirming.";
+                updateButtons();
+            }
         }
 
         refreshHistory();

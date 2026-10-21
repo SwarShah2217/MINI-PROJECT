@@ -1,264 +1,149 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>SyncLAN</title>
-
-    <link rel="stylesheet" href="style.css">
+    <meta name="color-scheme" content="light dark">
+    <title>SyncLAN · Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
 </head>
-
 <body>
+    <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+        <symbol id="i-transfer" viewBox="0 0 24 24"><path d="M7 3v16m-4-4 4 4 4-4M17 21V5m-4 4 4-4 4 4"/></symbol>
+        <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 11a8 8 0 0 1-8 8H7l-5 3 2-6a8 8 0 1 1 17-5Z"/><path d="M8 10h8M8 14h5"/></symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="m8 14 3-3 3 3m-3-3v7"/></symbol>
+        <symbol id="i-pair" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><path d="M15 15h3v3h3v3h-6Zm6-3v3M12 3v3M3 12h3"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="m9 3-1 3-3 1-2 3 2 2v3l3 2 1 4h6l1-4 3-2v-3l2-2-2-3-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-device" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M8 21h8m-4-5v5"/></symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/><path d="m8 12 3 3 5-6"/></symbol>
+    </svg>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
+    <div id="appShell" class="app-shell">
+        <aside class="sidebar" aria-label="Application sidebar">
+            <a class="brand" href="#dashboard" data-view="dashboard" aria-label="SyncLAN dashboard">
+                <span class="brand-mark"><svg class="icon"><use href="#i-transfer"/></svg></span>
+                <span class="brand-name">SyncLAN<span>YOUR LOCAL WORKSPACE</span></span>
+            </a>
+            <p class="nav-caption">WORKSPACE</p>
+            <nav class="navigation" aria-label="Main navigation">
+                <a href="#dashboard" data-view="dashboard" aria-label="Dashboard" title="Dashboard" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span>Dashboard</span></a>
+                <a href="#devices" data-view="devices" aria-label="Nearby Devices" title="Nearby Devices"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg><span>Nearby Devices</span></a>
+                <a href="#transfers" data-view="transfers" aria-label="File Transfers" title="File Transfers"><svg class="icon" aria-hidden="true"><use href="#i-transfer"/></svg><span>File Transfers</span></a>
+                <a href="#chat" data-view="chat" aria-label="LAN Chat" title="LAN Chat"><svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg><span>LAN Chat</span></a>
+                <a href="#sync" data-view="sync" aria-label="Folder Sync" title="Folder Sync"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>Folder Sync</span></a>
+                <a href="#pairing" data-view="pairing" aria-label="Device Pairing" title="Device Pairing"><svg class="icon" aria-hidden="true"><use href="#i-pair"/></svg><span>Device Pairing</span></a>
+                <a href="#settings" data-view="settings" aria-label="Settings" title="Settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></a>
+            </nav>
+            <div class="sidebar-footer">
+                <span class="status-dot" aria-hidden="true"></span>
+                <div><strong id="sidebarConnection">Checking connection</strong><span>Local network workspace</span></div>
+            </div>
+        </aside>
 
-    <h1>SyncLAN</h1>
+        <main id="workspace" class="workspace" tabindex="-1">
+            <header class="topbar">
+                <div><p class="eyebrow">WORKSPACE / <span id="viewBreadcrumb">OVERVIEW</span></p><h1 id="viewTitle" tabindex="-1">Dashboard</h1></div>
+                <p id="status" class="connection-pill" role="status">Checking connection…</p>
+            </header>
 
-    <p>LAN File Transfer System</p>
-
-    <!-- Displays SyncLAN devices discovered on the local network -->
-    <div class="devices-section">
-
-        <h2>Nearby Devices</h2>
-
-        <div id="deviceList">
-            <p>No devices found.</p>
-        </div>
-
-    </div>
-
-
-    <!-- File selection section -->
-    <div class="file-section">
-
-        <h2>Send File</h2>
-
-        <input type="file" id="fileInput" multiple disabled>
-
-        <button id="sendFileButton" disabled>
-            Send File
-        </button>
-
-        <p id="selectedFile">
-            Connect to a device to select a file.
-        </p>
-
-        <!-- Add this inside the .file-section div -->
-        <div id="transferControls" class="hidden">
-
-            <p id="transferFileName">Preparing transfer...</p>
-
-            <div class="progress-container">
-                <div id="progressBar" class="progress-bar"></div>
+            <!-- Requests stay available regardless of the selected view. -->
+            <div class="request-stack">
+                <p id="connectionNotice" class="feedback connection-notice" role="status"></p>
+                <section id="connectionRequest" class="request-box hidden" aria-labelledby="connectionRequestTitle" aria-live="polite">
+                    <div><span class="eyebrow">ACTION REQUIRED</span><h2 id="connectionRequestTitle">Connection request</h2><p id="requestMessage">Another device wants to connect.</p></div>
+                    <div class="button-row"><button id="acceptButton" class="primary" disabled>Accept connection</button><button id="rejectButton" disabled>Reject</button><p id="connectionRequestError" class="feedback error" role="status"></p></div>
+                </section>
+                <section id="fileRequestBox" class="request-box hidden" aria-labelledby="fileRequestTitle">
+                    <div><span class="eyebrow">ACTION REQUIRED</span><h2 id="fileRequestTitle">Incoming file</h2><p id="fileRequestMessage">A device wants to send a file.</p><p id="fileRequestError" class="feedback error" role="status"></p></div>
+                    <div class="button-row"><button id="acceptFileButton" class="primary" disabled>Accept file</button><button id="rejectFileButton" disabled>Reject file</button></div>
+                </section>
             </div>
 
-            <p id="progressText">0%</p>
+            <section id="view-dashboard" class="app-view" aria-label="Dashboard" title="Dashboard">
+                <div class="page-intro"><div><h2>A little closer. A lot faster.</h2><p>Connect your devices and keep your work moving across your LAN.</p></div><a class="button primary" href="#pairing" data-view="pairing">Pair a device <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
+                <div class="stats-grid">
+                    <article class="card stat-card"><span class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-device"/></svg></span><p>This workspace</p><strong id="localWorkspace">Local browser</strong><span class="muted">This device’s SyncLAN interface</span></article>
+                    <article class="card stat-card"><span class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-pair"/></svg></span><p>Peer connection</p><strong id="dashboardPeer">Checking…</strong><span id="dashboardConnectionDetail" class="muted">Waiting for connection status</span></article>
+                    <article class="card stat-card"><span class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-transfer"/></svg></span><p>Transfer queue</p><strong id="dashboardQueue">Checking…</strong><span id="dashboardTransfer" class="muted">Waiting for transfer status</span></article>
+                </div>
+                <div class="dashboard-grid">
+                    <section class="card"><div class="section-heading"><div><h2>Nearby devices</h2><p>Discover PCs and request a connection</p></div><span id="dashboardDeviceCount" class="badge">Discovering</span></div><p class="muted">Choose a discovered device to send a connection request. The receiving PC can accept or reject it.</p><a href="#devices" data-view="devices" class="button primary">Browse nearby devices <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a></section>
+                    <section class="card"><div class="section-heading"><div><h2>Quick actions</h2><p>Pick up where you need to</p></div></div>
+                        <div class="quick-actions">
+                            <a href="#transfers" data-view="transfers"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><span><strong>Send files</strong><small>Share files with your connected peer</small></span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+                            <a href="#chat" data-view="chat"><svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg><span><strong>Start a conversation</strong><small>Messages across your LAN</small></span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+                            <a href="#sync" data-view="sync"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span><strong>Sync a folder</strong><small>Preview changes before sending</small></span><svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+                        </div>
+                    </section>
+                </div>
+                <section class="card activity-card"><div class="section-heading"><div><h2>Recent activity</h2><p>Your recorded transfer requests</p></div></div><div id="phase42Activity"><p class="muted">Loading activity…</p></div></section>
+            </section>
 
-            <div class="transfer-buttons">
-                <button id="pauseButton">Pause</button>
-                <button id="resumeButton" class="hidden">Resume</button>
-                <button id="cancelButton">Cancel</button>
-            </div>
+            <section id="view-devices" class="app-view" aria-label="Nearby Devices" hidden>
+                <div class="page-intro"><div><h2>Find your next connection.</h2><p>Devices discovered by SyncLAN on your local network update automatically.</p></div><button id="refreshDevices">Refresh device list</button></div>
+                <section class="card devices-section"><div class="section-heading"><div><h2>Nearby devices</h2><p>Request a connection to one PC at a time. The receiver must accept before you can share.</p></div><span id="deviceCount" class="badge">Discovering</span></div><p id="devicesFeedback" class="feedback" role="status">Checking LAN discovery…</p><div id="deviceList"><p class="empty-state">Looking for devices on your LAN…</p></div></section>
+                <p class="muted">Prefer a code? <a href="#pairing" data-view="pairing">Use PIN or QR pairing</a>.</p>
+            </section>
 
-        </div>
+            <section id="view-transfers" class="app-view" aria-label="File Transfers" title="File Transfers" hidden>
+                <div class="page-intro"><div><h2>Files, without the detour.</h2><p>Send to your connected peer. Every completed file is verified.</p></div></div>
+                <div class="two-column">
+                    <section class="card file-section"><div class="section-heading"><div><h2>Send files</h2><p>Choose one file or a whole batch</p></div><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg></div>
+                        <div class="file-picker"><svg class="icon large-icon" aria-hidden="true"><use href="#i-upload"/></svg><label for="fileInput">Choose files to share</label><p>Connect from Nearby Devices or Device Pairing first.</p><input type="file" id="fileInput" multiple disabled></div>
+                        <p id="selectedFile" class="feedback" role="status">Connect to a device to select a file.</p><button id="sendFileButton" class="primary" disabled>Send selected files <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+                    </section>
+                    <section class="card"><div class="section-heading"><div><h2>Transfer status</h2><p>Outgoing and incoming files</p></div><span id="transferState" class="badge">Checking</span></div>
+                        <div id="transferEmpty" class="empty-state"><svg class="icon" aria-hidden="true"><use href="#i-transfer"/></svg><h3>Ready when you are</h3><p>Your next transfer will appear here.</p></div>
+                        <div id="transferControls" class="hidden"><p id="transferFileName" class="file-title">Preparing transfer…</p><div id="outgoingProgress" class="progress-container" role="progressbar" aria-label="Outgoing transfer" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressBar" class="progress-bar"></div></div><p id="progressText">0%</p><p id="transferMetrics" class="muted"></p><div class="transfer-buttons button-row"><button id="pauseButton">Pause</button><button id="resumeButton" class="hidden">Resume</button><button id="cancelButton" class="danger">Cancel</button></div></div>
+                        <p id="transferQueue" class="muted"></p><p id="transferResult" class="feedback" role="status"></p><p id="incomingProgress" class="incoming-progress" role="status"></p>
+                    </section>
+                </div>
+                <section class="card recovery-section"><div class="section-heading"><div><span class="eyebrow">PICK UP WHERE YOU LEFT OFF</span><h2>Interrupted transfer recovery</h2><p>Find a retained source on the sending PC, then request recovery. The receiving PC must accept and verify its checkpoint.</p></div><button id="refreshRecovery">Find retained sources</button></div><div id="recoverySources"></div><p id="recoveryStatus" class="feedback" role="status">Sources are inspected only when you choose “Find retained sources”.</p></section>
+            </section>
 
+            <section id="view-chat" class="app-view" aria-label="LAN Chat" title="LAN Chat" hidden>
+                <section id="phase42Panel" class="card chat-panel">
+                    <div class="chat-header"><span class="peer-avatar"><svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg></span><div><h2 id="chatPeer">LAN Chat</h2><p id="chatConnection" class="muted">Connect a device to start chatting.</p></div><a href="#pairing" data-view="pairing" class="button">Pair device</a></div>
+                    <div id="phase42Messages" class="messages" role="log" aria-label="Chat messages" aria-live="polite"><div class="empty-state"><h3>A conversation starts here</h3><p>Messages from your LAN chat appear in this space.</p></div></div>
+                    <div class="chat-composer"><label for="phase42Input" class="sr-only">Message to connected peer</label><input id="phase42Input" placeholder="Message your connected device…" maxlength="2000" autocomplete="off" disabled><button id="phase42Attach" aria-label="Choose files to share" disabled>Attach</button><button id="phase42Send" class="primary" disabled>Send <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></div>
+                    <button id="phase42Drop" class="chat-drop" disabled>Drop files here, or click to choose files</button><p id="phase42Feedback" class="feedback" role="status"></p>
+                </section>
+            </section>
+
+            <section id="view-sync" class="app-view" aria-label="Folder Sync" title="Folder Sync" hidden>
+                <div class="page-intro"><div><h2>Keep your folders in step.</h2><p>Compare first. Choose exactly which changes to send.</p></div></div>
+                <section class="card folder-sync-section"><div class="section-heading"><div><h2>Compare folders</h2><p>Use absolute folder paths on the sending and receiving PCs.</p></div><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg></div>
+                    <div class="two-column form-grid"><div><label for="sourceFolderPath">Source folder · this PC</label><input type="text" id="sourceFolderPath" placeholder="C:\Users\You\Documents\Project" disabled></div><div><label for="destinationFolderPath">Destination folder · peer PC</label><input type="text" id="destinationFolderPath" placeholder="C:\Users\Peer\Documents\Project" disabled></div></div>
+                    <button id="syncFolderButton" hidden disabled>Sync folder</button><button id="phase43PreviewButton" class="primary" disabled>Preview changes</button><p id="folderSyncStatus" class="feedback" role="status">Connect to a device to synchronize folders.</p><p class="muted">Preview compares folder metadata. Confirm which changes to send; the receiving PC still accepts or rejects each incoming file.</p>
+                    <div id="phase43Panel" class="sync-preview" style="display:none"><h3>Review changes</h3><p id="phase43Counts" class="badge"></p><div id="phase43Files" class="sync-files"></div><div class="button-row"><button id="phase43Whole" class="primary">Sync all changes</button><button id="phase43Selected">Sync selected files</button></div></div>
+                </section>
+                <section class="card"><div class="section-heading"><div><h2>Sync history</h2><p>Completion is recorded after file verification</p></div></div><div id="phase43History"><p class="muted">Loading history…</p></div></section>
+            </section>
+
+            <section id="view-pairing" class="app-view" aria-label="Device Pairing" title="Device Pairing" hidden>
+                <div class="page-intro"><div><h2>Two devices. One workspace.</h2><p>Pair with a temporary PIN or a photo of a QR code.</p></div></div>
+                <div id="phase44a" class="two-column">
+                    <section class="card"><div class="section-heading"><div><span class="eyebrow">ON THIS PC</span><h2>Create a pairing code</h2><p>Show your code to the other device.</p></div></div><button id="p44create" class="primary">Generate PIN &amp; QR</button><div class="pairing-code"><strong id="p44pin" aria-label="Pairing PIN">— — — — — —</strong><p id="p44expiry" class="muted">Codes expire after two minutes and can be used once.</p><img id="p44qr" alt="SyncLAN pairing QR code" style="display:none"><p id="p44ip" class="muted"></p></div></section>
+                    <section class="card"><div class="section-heading"><div><span class="eyebrow">CONNECT TO A PEER</span><h2>Enter a pairing code</h2><p>Generate a code on the other PC first.</p></div></div><label for="p44host">Peer LAN IP address</label><input id="p44host" placeholder="192.168.1.10" inputmode="decimal" autocomplete="off"><label for="p44code">6-digit PIN</label><input id="p44code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="off"><button id="p44connect" class="primary">Pair with PIN</button><div class="divider"><span>or use a QR photo</span></div><label for="p44photo">Choose a photo of the peer’s pairing QR</label><input id="p44photo" type="file" accept="image/*"><button id="p44decode">Read QR &amp; pair</button></section>
+                </div><p id="p44status" class="feedback" role="status"></p>
+            </section>
+
+            <section id="view-settings" class="app-view" aria-label="Settings" title="Settings" hidden>
+                <div class="page-intro"><div><h2>Make yourself at home.</h2><p>A few preferences for your local workspace.</p></div></div>
+                <section class="card settings-card"><div class="setting-row"><div><h2>Appearance</h2><p>Choose a light or dark workspace. Your preference is saved in this browser.</p></div><button id="themeToggle" aria-pressed="false">Dark mode</button></div><div class="setting-row"><div><h2>Desktop notifications</h2><p>Get notified when transfers complete or need attention.</p><p id="notificationStatus" class="feedback" role="status">Notifications are optional and use your browser’s permission settings.</p></div><button id="enableNotifications">Enable notifications</button></div></section>
+                <section class="card about-card"><span class="stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h2>Your files. Your network.</h2><p>SyncLAN connects your devices over the LAN. Transfers use encrypted chunks and SHA-256 integrity verification.</p><p class="muted">This interface runs locally in your browser.</p></div></section>
+            </section>
+        </main>
     </div>
-
-    <!-- Folder synchronization section -->
-    <div class="folder-sync-section">
-
-        <h2>Folder Sync</h2>
-
-        <p>
-            Synchronize new and modified files
-            with the connected device.
-        </p>
-
-        <input
-            type="text"
-            id="sourceFolderPath"
-            placeholder="Source folder path"
-            disabled
-        >
-
-        <input
-            type="text"
-            id="destinationFolderPath"
-            placeholder="Destination folder path"
-            disabled
-        >
-
-        <button id="syncFolderButton"
-                disabled
-                style="display:none">
-            Sync Folder
-        </button>
-
-        <button id="phase43PreviewButton" disabled>
-            Preview Changes
-        </button>
-
-        <div id="phase43Panel"
-             style="display:none;margin-top:12px">
-
-            <p id="phase43Counts"></p>
-
-            <div id="phase43Files"
-                 style="max-height:260px;
-                        overflow:auto;
-                        border:1px solid #999;
-                        padding:10px">
-            </div>
-
-            <button id="phase43Whole">
-                Confirm Whole Folder Sync
-            </button>
-
-            <button id="phase43Selected">
-                Confirm Selected Files
-            </button>
-        </div>
-
-        <h3>Sync History</h3>
-
-        <div id="phase43History"></div>
-
-        <p id="folderSyncStatus">
-            Connect to a device to synchronize folders.
-        </p>
-
-    </div>
-
-
-    <div id="connectionRequest" class="request-box hidden">
-
-        <h2>Incoming Connection Request</h2>
-
-        <p id="requestMessage">
-            Another device wants to connect.
-        </p>
-
-        <button id="acceptButton">Accept</button>
-
-        <button id="rejectButton">Reject</button>
-
-    </div>
-
-    <!-- Incoming file transfer request -->
-    <div id="fileRequestBox" class="request-box hidden">
-
-        <h2>Incoming File</h2>
-
-        <p id="fileRequestMessage">
-            A device wants to send a file.
-        </p>
-
-        <button id="acceptFileButton">
-            Accept File
-        </button>
-
-        <button id="rejectFileButton">
-            Reject File
-        </button>
-
-    </div>
-
-    <p id="status">
-        Waiting for devices...
-    </p>
-
-    <script src="script.js"></script>
-    <script src="phase42.js"></script>
-
-<script src="/phase43.js"></script>
-
-<section
-    id="phase44a"
-    style="
-        border:1px solid #888;
-        padding:16px;
-        margin:16px 0;
-    "
->
-    <h2>Phase 4.4A — PIN / QR Pairing</h2>
-
-    <p>
-        On PC1, generate a temporary code.
-        On PC2, enter its LAN IP and PIN,
-        or upload a photo of its QR code.
-    </p>
-
-    <button id="p44create">
-        Generate PIN + QR (this PC)
-    </button>
-
-    <p id="p44expiry"></p>
-
-    <strong
-        id="p44pin"
-        style="font-size:26px"
-    ></strong>
-
-    <div>
-        <img
-            id="p44qr"
-            alt="Pairing QR"
-            style="
-                max-width:300px;
-                display:none;
-            "
-        >
-    </div>
-
-    <p id="p44ip"></p>
-
-    <hr>
-
-    <label>
-        PC1 LAN IP
-        <input
-            id="p44host"
-            placeholder="192.168.1.10"
-        >
-    </label>
-
-    <label>
-        6-digit PIN
-        <input
-            id="p44code"
-            inputmode="numeric"
-            maxlength="6"
-            placeholder="123456"
-        >
-    </label>
-
-    <button id="p44connect">
-        Pair with PIN
-    </button>
-
-    <p>
-        Or choose a photo of the QR code from PC1:
-    </p>
-
-    <input
-        id="p44photo"
-        type="file"
-        accept="image/*"
-    >
-
-    <button id="p44decode">
-        Decode photo and pair
-    </button>
-
-    <p
-        id="p44status"
-        role="status"
-    ></p>
-</section>
-
-<script src="/jsqr.js"></script>
-<script src="/phase44a.js"></script>
-
+    <noscript><p class="request-box">SyncLAN needs JavaScript to connect to the local backend.</p></noscript>
+    <script src="/script.js"></script>
+    <script src="/phase42.js"></script>
+    <script src="/phase43.js"></script>
+    <script src="/jsqr.js"></script>
+    <script src="/phase44a.js"></script>
+    <script src="/phase45.js"></script>
 </body>
-
 </html>

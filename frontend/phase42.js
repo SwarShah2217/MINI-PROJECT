@@ -1,74 +1,5 @@
-
 (() => {
-    const style = document.createElement("style");
-    style.textContent = `
-        #phase42Panel {
-            max-width: 760px;
-            margin: 24px auto;
-            padding: 18px;
-            border: 1px solid #aaa;
-            border-radius: 12px;
-            background: #f7f8fa;
-            color: #202124;
-        }
-        #phase42Panel h2 { margin-top: 0; }
-        #phase42Messages, #phase42Activity {
-            height: 170px;
-            overflow-y: auto;
-            padding: 10px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            margin: 10px 0;
-        }
-        #phase42Panel .p42row {
-            display: flex;
-            gap: 8px;
-            margin: 10px 0;
-            flex-wrap: wrap;
-        }
-        #phase42Input {
-            flex: 1;
-            min-width: 170px;
-            padding: 8px;
-        }
-        #phase42Drop {
-            border: 2px dashed #888;
-            border-radius: 8px;
-            padding: 22px;
-            text-align: center;
-            cursor: pointer;
-        }
-        #phase42Drop.dragging {
-            border-color: #1976d2;
-            background: #dceeff;
-        }
-        #phase42Panel .p42item {
-            padding: 5px;
-            border-bottom: 1px solid #eee;
-            overflow-wrap: anywhere;
-        }
-        #phase42Feedback { font-size: 13px; }
-    `;
-    document.head.appendChild(style);
-
-    const panel = document.createElement("section");
-    panel.id = "phase42Panel";
-    panel.innerHTML = `
-        <h2>LAN Chat</h2>
-        <div id="phase42Messages" aria-live="polite"></div>
-        <div class="p42row">
-            <input id="phase42Input" placeholder="Type a message..." maxlength="2000">
-            <button id="phase42Send">Send</button>
-            <button id="phase42Attach">Share File</button>
-        </div>
-        <div id="phase42Drop">Drop files here to transfer</div>
-        <p id="phase42Feedback"></p>
-        <h2>Transfer Activity</h2>
-        <div id="phase42Activity"></div>
-    `;
-
-    document.body.appendChild(panel);
+    const panel = document.getElementById("phase42Panel");
 
     const messages = document.getElementById("phase42Messages");
     const activity = document.getElementById("phase42Activity");
@@ -195,10 +126,33 @@
     function render(container, entries, format) {
         container.replaceChildren();
 
+        if (!entries.length) {
+            const empty = document.createElement("p");
+            empty.className = "empty-state";
+            empty.textContent = container === messages
+                ? "No messages yet. Say hello to your connected peer."
+                : "No recorded transfer activity yet.";
+            container.appendChild(empty);
+            return;
+        }
+
         for (const entry of entries) {
             const item = document.createElement("div");
-            item.className = "p42item";
-            item.textContent = format(entry);
+            if (container === messages) {
+                item.className = "message " + (entry.direction === "outgoing" ? "outgoing" : "incoming");
+                const bubble = document.createElement("div");
+                bubble.className = "message-bubble";
+                bubble.textContent = entry.text;
+                const meta = document.createElement("span");
+                meta.className = "message-meta";
+                const date = new Date(entry.timestamp);
+                meta.textContent = (entry.direction === "outgoing" ? "You" : "Peer") +
+                    (Number.isNaN(date.getTime()) ? "" : " · " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+                item.append(bubble, meta);
+            } else {
+                item.className = "activity-item";
+                item.textContent = format(entry);
+            }
             container.appendChild(item);
         }
     }
@@ -215,12 +169,15 @@
 
             const chatKey = JSON.stringify(chat.messages);
             if (chatKey !== previousMessages) {
+                const oldScrollTop = messages.scrollTop;
+                const followLatest = previousMessages === "" ||
+                    messages.scrollHeight - messages.clientHeight - oldScrollTop < 48;
                 previousMessages = chatKey;
                 render(messages, chat.messages, entry =>
                     (entry.direction === "outgoing" ? "You: " : "Peer: ") +
                     entry.text
                 );
-                messages.scrollTop = messages.scrollHeight;
+                messages.scrollTop = followLatest ? messages.scrollHeight : oldScrollTop;
             }
 
             const activityKey = JSON.stringify(history.activity);

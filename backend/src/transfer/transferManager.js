@@ -32,6 +32,53 @@ class TransferManager {
             new SessionKeyManager();
 
         this.keyExchanges = new Map();
+        this.lastTransfer = null;
+    }
+
+    getStatus(now = Date.now()) {
+        const transfer = this.activeTransfer;
+        const bytes = transfer ? (this.acknowledgedBytes || 0) : 0;
+        const elapsed = Math.max(0, (now - (this.progressStartedAt || now)) / 1000);
+        const speed = transfer?.status === "transferring" && elapsed > 0
+            ? Math.max(0, bytes - (this.progressStartBytes || 0)) / elapsed : 0;
+        return {
+            isPending: !!transfer, status: transfer?.status || "idle",
+            transferId: transfer?.transferId || null, fileName: transfer?.fileName || null,
+            sentBytes: bytes, totalBytes: transfer?.fileSize || 0,
+            bytesPerSecond: speed,
+            etaSeconds: speed > 0 ? Math.max(0, transfer.fileSize - bytes) / speed : null,
+            queueLength: this.transferQueue.length, lastTransfer: this.lastTransfer,
+            incoming: this.incomingTransfer || null
+        };
+    }
+
+    finishTransfer(status, transfer = this.activeTransfer) {
+        if (!transfer || this.activeTransfer !== transfer) return;
+        transfer.status = status;
+        this.lastTransfer = {
+            transferId: transfer.transferId, fileName: transfer.fileName,
+            fileSize: transfer.fileSize, status, at: Date.now()
+        };
+        const socket = this.fileSocket;
+        this.fileSocket = null;
+        this.activeTransfer = null;
+        this.isPaused = false;
+        this.awaitingAck = null;
+        if (this.fileDescriptor !== undefined && this.fileDescriptor !== null) {
+            try { fs.closeSync(this.fileDescriptor); } catch (error) {
+                console.error("Could not close source file:", error.message);
+            }
+            this.fileDescriptor = null;
+        }
+        this.sessionKeyManager.removeSessionKey(transfer.transferId);
+        this.keyExchanges.delete(transfer.transferId);
+        if (status !== "completed" && transfer.phase43HistoryId && this.phase43History) {
+            this.phase43History.update(transfer.phase43HistoryId, { status: "interrupted" });
+        }
+        // Keep uploaded/recovered sources for explicit recovery and inspection.
+        // Folder-sync source files are also always retained.
+        if (socket && !socket.destroyed) socket.end();
+        this.processQueue();
     }
 
     // Send file metadata to the connected peer
@@ -82,6 +129,86 @@ class TransferManager {
 
         console.log(
             `File added to transfer queue: ${fileName} (${fileSize} bytes)`
+        );
+
+        return true;
+    }
+
+    // PHASE44B_QUEUE_INTERRUPTED_TRANSFER_V1
+    queueInterruptedTransfer(transferId, fileName, expectedSize) {
+        if (
+            this.connectionState.status !== "connected" ||
+            !this.connectionState.socket ||
+            this.connectionState.socket.destroyed
+        ) {
+            console.error("Cannot resume: peer is not connected");
+            return false;
+        }
+
+        if (
+            typeof transferId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transferId) ||
+            typeof fileName !== "string" ||
+            fileName.length === 0 ||
+            fileName === "." ||
+            fileName === ".." ||
+            path.basename(fileName) !== fileName ||
+            fileName.includes("/") ||
+            fileName.includes("\\") ||
+            !Number.isSafeInteger(expectedSize) ||
+            expectedSize <= 0
+        ) {
+            console.error("Invalid interrupted transfer metadata");
+            return false;
+        }
+
+        const filePath = path.join(
+            __dirname,
+            "../../temp",
+            `${transferId}-${fileName}`
+        );
+
+        let stats;
+
+        try {
+            stats = fs.statSync(filePath);
+
+            if (!stats.isFile() || stats.size !== expectedSize) {
+                throw new Error("Source file size does not match");
+            }
+        } catch (error) {
+            console.error(
+                "Cannot recover source file:",
+                error.message
+            );
+            return false;
+        }
+
+        if (
+            this.activeTransfer?.transferId === transferId ||
+            this.transferQueue.some(
+                (transfer) => transfer.transferId === transferId
+            )
+        ) {
+            console.error("Transfer is already active or queued");
+            return false;
+        }
+
+        this.transferQueue.push({
+            transferId,
+            fileName,
+            fileSize: stats.size,
+            filePath,
+            resumeMode: true,
+            status: "queued"
+        });
+
+        if (!this.activeTransfer) {
+            this.processQueue();
+        }
+
+        console.log(
+            `Interrupted transfer queued for recovery: ${transferId}`
         );
 
         return true;
@@ -187,6 +314,9 @@ class TransferManager {
         }
 this.activeTransfer = this.transferQueue.shift();
         this.activeTransfer.status = "pending";
+        this.activeTransfer.controlSocket = socket;
+        this.offset = 0;
+        this.acknowledgedBytes = 0;
 
         const keyExchange =
             KeyExchangeService.createKeyPair();
@@ -198,6 +328,9 @@ this.activeTransfer = this.transferQueue.shift();
 
         const request = {
             type: "FILE_TRANSFER_REQUEST",
+
+            // PHASE44B_RESUME_CONTROL_FLAG_V1
+            resume: this.activeTransfer.resumeMode === true,
 
             fileName:
                 this.activeTransfer.fileName,
@@ -229,6 +362,8 @@ this.activeTransfer = this.transferQueue.shift();
     }
 
     connectForFileTransfer(peerIp) {
+
+        const requestedTransfer = this.activeTransfer;
 
         return new Promise((resolve, reject) => {
 
@@ -273,6 +408,9 @@ socket.on("data", (data) => {
             continue;
         }
 
+        // Late responses from an old socket must never affect the next file.
+        if (this.activeTransfer !== requestedTransfer || this.fileSocket !== socket) continue;
+
         let message;
 
         try {
@@ -290,15 +428,73 @@ socket.on("data", (data) => {
             continue;
         }
 
+        if (!message || typeof message !== "object" || typeof message.type !== "string") {
+            socket.destroy();
+            continue;
+        }
+
+        // PHASE44B_RESUME_READY_V1
+        if (message.type === "RESUME_READY") {
+            const transfer = this.activeTransfer;
+            const chunkSize = 64 * 1024;
+
+            const valid =
+                transfer &&
+                this.fileSocket === socket &&
+                transfer.resumeMode === true &&
+                message.transferId === transfer.transferId &&
+                Number.isSafeInteger(message.verifiedBytes) &&
+                Number.isSafeInteger(message.nextChunk) &&
+                message.verifiedBytes >= 0 &&
+                message.verifiedBytes <= transfer.fileSize &&
+                message.nextChunk >= 0 &&
+                message.nextChunk === Math.ceil(message.verifiedBytes / chunkSize) &&
+                (message.verifiedBytes === transfer.fileSize || message.verifiedBytes % chunkSize === 0) &&
+                !socket.destroyed;
+
+            if (!valid) {
+                console.error("Invalid or unexpected RESUME_READY response");
+                socket.destroy();
+                continue;
+            }
+
+            if (transfer.resumeReadyReceived === true) {
+                console.error("Duplicate RESUME_READY response");
+                socket.destroy();
+                continue;
+            }
+
+            transfer.resumeReadyReceived = true;
+            this.offset = message.verifiedBytes;
+            this.acknowledgedBytes = this.offset;
+            this.chunkNumber = message.nextChunk;
+            this.progressStartedAt = Date.now();
+            this.progressStartBytes = this.offset;
+
+            console.log(
+                `Verified resume position: ${this.offset} bytes, chunk ${this.chunkNumber}`
+            );
+
+            if (transfer.resumeFileReady === true) {
+                this.sendNextChunk();
+            } else {
+                console.log("RESUME_READY received; waiting for source file to open");
+            }
+            continue;
+        }
 
         if (
             message.type ===
             "CHUNK_ACK"
         ) {
 
-            console.log(
-                `ACK received for chunk ${message.chunkNumber}`
-            );
+            if (!Number.isSafeInteger(message.chunkNumber) || message.chunkNumber !== this.awaitingAck) {
+                socket.destroy();
+                continue;
+            }
+            this.awaitingAck = null;
+            this.acknowledgedBytes = this.offset;
+            this.sendNextChunk();
 
             continue;
         }
@@ -313,9 +509,11 @@ socket.on("data", (data) => {
                 `NACK received for chunk ${message.chunkNumber}`
             );
 
-            this.resendChunk(
-                message.chunkNumber
-            );
+            if (!Number.isSafeInteger(message.chunkNumber) || message.chunkNumber !== this.awaitingAck || ++this.chunkRetries > 3) {
+                socket.destroy();
+                continue;
+            }
+            this.resendChunk(message.chunkNumber);
 
             continue;
         }
@@ -329,7 +527,7 @@ socket.on("data", (data) => {
                 "Receiver reported FINAL FILE SHA-256 FAILURE"
             );
 
-            socket.end();
+            this.finishTransfer("integrity_failed", requestedTransfer);
 
             continue;
         }
@@ -339,6 +537,11 @@ socket.on("data", (data) => {
             message.type ===
             "FILE_TRANSFER_COMPLETE"
         ) {
+
+            if (this.offset !== requestedTransfer.fileSize || this.awaitingAck !== null) {
+                socket.destroy();
+                continue;
+            }
 
             console.log(
                 "Receiver confirmed file transfer is complete"
@@ -381,21 +584,30 @@ socket.on("data", (data) => {
                 console.log(
                     "File transfer connection closed"
                 );
+                this.finishTransfer("interrupted", requestedTransfer);
             });
         });
     }
 
-    sendFile(fileSocket) {
+    sendFile(fileSocket, resumeMode = false) {
         if (!this.activeTransfer) return;
-
+        const transfer = this.activeTransfer;
         this.activeTransfer.status = "transferring";
+        this.activeTransfer.resumeMode = resumeMode === true;
+        this.activeTransfer.resumeReadyReceived = false;
+        this.activeTransfer.resumeFileReady = false;
         this.fileSocket = fileSocket;
         this.isPaused = false;
-        
+
         // State variables for manual chunking
         this.offset = 0;
+        this.acknowledgedBytes = 0;
         this.chunkSize = 64 * 1024; // Send in 64 KB chunks
         this.chunkNumber = 0;
+        this.awaitingAck = null;
+        this.readInFlight = false;
+        this.progressStartedAt = Date.now();
+        this.progressStartBytes = 0;
 
         this.encryptionKey =
             this.sessionKeyManager.getSessionKey(
@@ -412,7 +624,7 @@ socket.on("data", (data) => {
             fileSocket.destroy();
             return;
         }
-                
+
         console.log(`Starting file transfer: ${this.activeTransfer.fileName}`);
 
         // Calculate complete file SHA-256 before transfer
@@ -420,6 +632,8 @@ socket.on("data", (data) => {
             this.activeTransfer.filePath
         )
         .then((fileHash) => {
+
+            if (this.activeTransfer !== transfer || this.fileSocket !== fileSocket || fileSocket.destroyed) return;
 
             this.activeTransfer.fileHash =
                 fileHash;
@@ -452,7 +666,9 @@ socket.on("data", (data) => {
                         this.activeTransfer.relativePath || null,
 
                     destinationPath:
-                        this.activeTransfer.destinationPath || null
+                        this.activeTransfer.destinationPath || null,
+
+                    resume: resumeMode === true
 
                 }) + "\n";
 
@@ -469,6 +685,10 @@ socket.on("data", (data) => {
                 this.activeTransfer.filePath,
                 "r",
                 (error, fd) => {
+                    if (this.activeTransfer !== transfer || this.fileSocket !== fileSocket || fileSocket.destroyed) {
+                        if (!error) fs.close(fd, () => {});
+                        return;
+                    }
                     if (error) {
                         console.error(
                             "Error opening file:",
@@ -480,7 +700,18 @@ socket.on("data", (data) => {
                     }
 
                     this.fileDescriptor = fd;
-                    this.sendNextChunk();
+
+                    if (resumeMode) {
+                        this.activeTransfer.resumeFileReady = true;
+
+                        if (this.activeTransfer.resumeReadyReceived === true) {
+                            this.sendNextChunk();
+                        } else {
+                            console.log("Source file opened; waiting for RESUME_READY");
+                        }
+                    } else {
+                        this.sendNextChunk();
+                    }
                 }
             );
 
@@ -499,9 +730,22 @@ socket.on("data", (data) => {
 
     sendNextChunk() {
 
-        if (this.isPaused || !this.fileSocket) {
+        if (this.isPaused || !this.fileSocket || this.fileSocket.destroyed ||
+            !this.activeTransfer || this.readInFlight || this.awaitingAck !== null ||
+            this.fileDescriptor === null || this.fileDescriptor === undefined) {
             return;
         }
+
+        const transfer = this.activeTransfer;
+        const socket = this.fileSocket;
+        if (transfer.resumeMode && !transfer.resumeReadyReceived) return;
+        if (this.offset === transfer.fileSize) {
+            transfer.status = "verifying";
+            fs.close(this.fileDescriptor, () => {});
+            this.fileDescriptor = null;
+            return;
+        }
+        this.readInFlight = true;
 
         const buffer =
             Buffer.alloc(this.chunkSize);
@@ -513,6 +757,8 @@ socket.on("data", (data) => {
             this.chunkSize,
             this.offset,
             (error, bytesRead) => {
+                if (this.activeTransfer !== transfer || this.fileSocket !== socket || socket.destroyed) return;
+                this.readInFlight = false;
 
                 if (error) {
 
@@ -526,16 +772,8 @@ socket.on("data", (data) => {
                 }
 
                 if (bytesRead === 0) {
-
-                    console.log(
-                        "All chunks sent. Waiting for receiver confirmation..."
-                    );
-
-                    fs.close(
-                        this.fileDescriptor,
-                        () => {}
-                    );
-
+                    // Source changed/truncated after its initial SHA-256.
+                    socket.destroy();
                     return;
                 }
 
@@ -585,28 +823,17 @@ socket.on("data", (data) => {
                     `Prepared chunk ${this.chunkNumber} | Original: ${bytesRead} bytes | Compressed: ${compressed.length} bytes | Encrypted: ${encrypted.encryptedData.length} bytes`
                 );
 
+                this.awaitingAck = this.chunkNumber;
+                this.chunkRetries = 0;
                 this.offset += bytesRead;
                 this.chunkNumber++;
 
-                const canWriteMore =
-                    this.fileSocket.write(frame);
-
-                if (canWriteMore) {
-
-                    this.sendNextChunk();
-
-                } else {
-
-                    this.fileSocket.once(
-                        "drain",
-                        () => {
-                            this.sendNextChunk();
-                        }
-                    );
-                }
+                // Existing ACK/NACK frames pace chunks so retransmissions arrive
+                // before subsequent chunks, as required by contiguous checkpoints.
+                socket.write(frame);
             }
         );
-    }    
+    }
 
     resendChunk(chunkNumber) {
 
@@ -616,6 +843,9 @@ socket.on("data", (data) => {
         ) {
             return;
         }
+
+        const transfer = this.activeTransfer;
+        const socket = this.fileSocket;
 
         const chunkOffset =
             chunkNumber * this.chunkSize;
@@ -627,6 +857,10 @@ socket.on("data", (data) => {
             this.activeTransfer.filePath,
             "r",
             (openError, fd) => {
+                if (this.activeTransfer !== transfer || this.fileSocket !== socket || socket.destroyed) {
+                    if (!openError) fs.close(fd, () => {});
+                    return;
+                }
 
                 if (openError) {
 
@@ -634,7 +868,7 @@ socket.on("data", (data) => {
                         `Could not reopen file for chunk ${chunkNumber}:`,
                         openError.message
                     );
-
+                    socket.destroy();
                     return;
                 }
 
@@ -650,6 +884,8 @@ socket.on("data", (data) => {
                             fd,
                             () => {}
                         );
+                        if (this.activeTransfer !== transfer || this.fileSocket !== socket ||
+                            socket.destroyed || this.awaitingAck !== chunkNumber) return;
 
                         if (readError) {
 
@@ -657,7 +893,7 @@ socket.on("data", (data) => {
                                 `Could not read chunk ${chunkNumber} for retransmission:`,
                                 readError.message
                             );
-
+                            socket.destroy();
                             return;
                         }
 
@@ -666,7 +902,7 @@ socket.on("data", (data) => {
                             console.error(
                                 `Chunk ${chunkNumber} does not exist`
                             );
-
+                            socket.destroy();
                             return;
                         }
 
@@ -728,7 +964,7 @@ socket.on("data", (data) => {
     }
 
     pauseTransfer() {
-        if (!this.isPaused && this.fileSocket) {
+        if (!this.isPaused && this.fileSocket && this.activeTransfer?.status === "transferring") {
             this.isPaused = true;
             this.activeTransfer.status = "paused";
             console.log("Transfer paused at offset:", this.offset);
@@ -741,8 +977,10 @@ socket.on("data", (data) => {
         if (this.isPaused && this.fileSocket) {
             this.isPaused = false;
             this.activeTransfer.status = "transferring";
+            this.progressStartedAt = Date.now();
+            this.progressStartBytes = this.acknowledgedBytes;
             console.log("Transfer resumed from offset:", this.offset);
-            
+
             // Kickstart the loop again
             this.sendNextChunk();
             return true;
@@ -751,64 +989,18 @@ socket.on("data", (data) => {
     }
 
     cancelTransfer() {
-        if (this.fileSocket) {
-            this.isPaused = true;
-            this.fileSocket.destroy();
-            console.log("Transfer cancelled by sender.");
-            this.cleanupTemporaryFile();
+        if (this.activeTransfer && this.fileSocket) {
+            const transfer = this.activeTransfer;
+            const socket = this.fileSocket;
+            this.finishTransfer("cancelled", transfer);
+            socket.destroy();
             return true;
         }
         return false;
     }
 
     cleanupTemporaryFile() {
-
-        if (!this.activeTransfer) {
-            return;
-        }
-
-
-        // Folder sync uses the original source file.
-        // Do not delete it after transfer.
-        if (this.activeTransfer.isFolderSync) {
-
-            console.log(
-                `Folder sync source preserved: ${this.activeTransfer.filePath}`
-            );
-
-            this.activeTransfer = null;
-
-            // Process the next file in the queue, if any
-            this.processQueue();
-
-            return;
-        }
-
-
-        fs.unlink(
-            this.activeTransfer.filePath,
-            (error) => {
-
-                if (error) {
-
-                    console.error(
-                        "Could not delete temporary file:",
-                        error.message
-                    );
-
-                    return;
-                }
-
-                console.log(
-                    `Temporary file deleted: ${this.activeTransfer.filePath}`
-                );
-
-                this.activeTransfer = null;
-
-                // Process the next file in the queue, if any
-                this.processQueue();
-            }
-        );
+        this.finishTransfer("completed");
     }
 }
 

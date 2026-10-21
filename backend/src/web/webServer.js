@@ -69,6 +69,64 @@ class WebServer {
     // Handle requests coming from the browser
     handleRequest(req, res) {
 
+        // Read-only discovery of retained upload sources, including after restart.
+        if (req.url === "/api/transfer/recovery" && req.method === "GET") {
+            const directory = path.join(__dirname, "../../temp");
+            try {
+                const sources = fs.existsSync(directory) ? fs.readdirSync(directory).flatMap(name => {
+                    const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(.+)$/i.exec(name);
+                    if (!match) return [];
+                    const stats = fs.lstatSync(path.join(directory, name));
+                    if (!stats.isFile() || stats.isSymbolicLink() || stats.size <= 0) return [];
+                    return [{ transferId: match[1], fileName: match[2], fileSize: stats.size }];
+                }) : [];
+                res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+                res.end(JSON.stringify({ sources }));
+            } catch (error) {
+                res.writeHead(500, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "Could not inspect retained sources" }));
+            }
+            return;
+        }
+
+        // Recovery only starts after an explicit browser action. The peer still
+        // accepts the request and verifies its checkpoint and the source hash.
+        if (req.url === "/api/transfer/recover" && req.method === "POST") {
+            const origin = req.headers.origin;
+            if (!String(req.headers["content-type"] || "").startsWith("application/json") ||
+                (origin && origin !== `http://${req.headers.host}`)) {
+                res.writeHead(403, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "Use the local SyncLAN interface" }));
+                return;
+            }
+            let body = "";
+            let oversized = false;
+            req.on("data", chunk => {
+                if (oversized) return;
+                body += chunk;
+                if (Buffer.byteLength(body) > 4096) {
+                    oversized = true;
+                    res.writeHead(413, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Request too large" }));
+                }
+            });
+            req.on("end", () => {
+                if (oversized) return;
+                let data;
+                try { data = JSON.parse(body); } catch {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Invalid JSON" }));
+                    return;
+                }
+                const success = data && this.transferManager.queueInterruptedTransfer(
+                    data.transferId, data.fileName, data.fileSize);
+                res.writeHead(success ? 200 : 409, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: !!success,
+                    error: success ? undefined : "Connect to the peer and select an available, unqueued source" }));
+            });
+            return;
+        }
+
         // PHASE44A_API: local-only PIN and QR pairing.
 
         if (
@@ -954,15 +1012,7 @@ class WebServer {
             req.method === "GET"
         ) {
             res.writeHead(200, { "Content-Type": "application/json" });
-            const isPending = this.transferManager.activeTransfer !== null;
-            res.end(JSON.stringify({ 
-                isPending: isPending,
-                status: isPending ? this.transferManager.activeTransfer.status : "idle",
-                fileName: isPending ? this.transferManager.activeTransfer.fileName : null,
-                sentBytes: isPending ? (this.transferManager.offset || 0) : 0,
-                totalBytes: isPending ? this.transferManager.activeTransfer.fileSize : 0,
-                queueLength: this.transferManager.transferQueue.length
-            }));
+            res.end(JSON.stringify(this.transferManager.getStatus()));
             
             return;
         }
@@ -977,7 +1027,9 @@ class WebServer {
             const response = {
                 pending: fileRequest !== null,
                 fileName: fileRequest ? fileRequest.fileName : null,
-                fileSize: fileRequest ? fileRequest.fileSize : null
+                fileSize: fileRequest ? fileRequest.fileSize : null,
+                transferId: fileRequest ? fileRequest.transferId : null,
+                resume: fileRequest?.resume === true
             };
 
             res.writeHead(200, {
@@ -1006,7 +1058,8 @@ class WebServer {
 
             res.end(
                 JSON.stringify({
-                    success: success
+                    success: success,
+                    error: success ? undefined : this.tcpServer.lastFileTransferError
                 })
             );
 
@@ -1213,6 +1266,8 @@ class WebServer {
                 "../../../frontend/script.js"
             );
 
+        } else if (req.url === "/phase45.js") {
+            filePath = path.join(__dirname, "../../../frontend/phase45.js");
         } else if (req.url === "/phase44a.js") {
             filePath = path.join(
                 __dirname,

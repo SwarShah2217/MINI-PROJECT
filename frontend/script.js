@@ -59,6 +59,38 @@ const cancelButton =
     document.getElementById("cancelButton");
 
 let isCancelled = false;
+let previousDeviceListKey = null;
+let discoveredDevices = [];
+let discoveryAvailable = false;
+let connectionRequestInFlight = false;
+let outgoingConnectionAttempt = null;
+let connectionEpoch = 0;
+let connectionStatusRequest = 0;
+const pendingApprovals = { connection: null, file: null };
+const approvalBusy = { connection: false, file: false };
+
+function uiMessage(id, message) {
+    const element = document.getElementById(id);
+    if (element && element.textContent !== message) element.textContent = message;
+}
+
+async function readApi(url, options = {}) {
+    const response = await fetch(url, { cache: "no-store", ...options });
+    const result = await response.json();
+    if (!response.ok) throw Error(result.error || result.message || "The local backend could not complete this request.");
+    return result;
+}
+
+function validDeviceIp(ip) {
+    return typeof ip === "string" && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) &&
+        ip.split(".").every(part => Number(part) <= 255) && !/^(0|127)\./.test(ip);
+}
+
+function publishConnection(state) {
+    currentConnectionStatus = state;
+    if (window.syncUI) window.syncUI.setConnection(state);
+    renderDevices();
+}
 
 // Folder sync controls
 const sourceFolderPath =
@@ -84,57 +116,140 @@ const folderSyncStatus =
 
 // Current TCP connection state
 let currentConnectionStatus = {
-    status: "disconnected",
+    status: "unavailable",
     connected: false,
     peerIp: null
 };
 
 
-// Check for incoming connection requests
-async function checkPendingConnection() {
+const approvalEpoch = { connection: 0, file: 0 };
+const approvalUi = {
+    connection: { box: requestBox, buttons: [acceptButton, rejectButton], error: "connectionRequestError" },
+    file: { box: fileRequestBox, buttons: [acceptFileButton, rejectFileButton], error: "fileRequestError" }
+};
 
+function incomingKey(kind, data) {
+    if (!data?.pending) return null;
+    if (kind === "connection") return validDeviceIp(data.ip) ? data.ip : null;
+    if (typeof data.fileName !== "string" || !Number.isSafeInteger(data.fileSize) || data.fileSize < 0) return null;
+    return data.transferId || JSON.stringify([data.fileName, data.fileSize, data.resume === true]);
+}
+
+function approvalButtons(kind) {
+    for (const button of approvalUi[kind].buttons) button.disabled = approvalBusy[kind] || !pendingApprovals[kind];
+}
+
+async function refreshIncomingRequest(kind) {
+    const epoch = approvalEpoch[kind];
+    const ui = approvalUi[kind];
     try {
-
-        const response =
-            await fetch("/api/connection/pending");
-
-        const data =
-            await response.json();
-
-
-        if (data.pending) {
-
-            requestBox.classList.remove("hidden");
-
-            requestMessage.textContent =
-                `${data.ip} wants to connect.`;
-
+        const data = await readApi("/api/" + (kind === "connection" ? "connection" : "transfer") + "/pending");
+        if (epoch !== approvalEpoch[kind]) return;
+        const oldKey = incomingKey(kind, pendingApprovals[kind]);
+        const key = incomingKey(kind, data);
+        pendingApprovals[kind] = key ? data : null;
+        if (key !== oldKey) uiMessage(ui.error, "");
+        if (key) {
+            ui.box.classList.remove("hidden");
+            if (kind === "connection") {
+                const device = discoveredDevices.find(found => found.ip === data.ip);
+                uiMessage("requestMessage", (device?.deviceName ? device.deviceName + " (" + data.ip + ")" : data.ip) +
+                    " wants to connect. Accept or reject this request.");
+            } else {
+                uiMessage("fileRequestMessage", (data.resume ? "Recovery request: " : "") + data.fileName +
+                    " (" + data.fileSize + " bytes). Accept or reject before any file data is received.");
+            }
         } else {
-
-            requestBox.classList.add("hidden");
+            ui.box.classList.add("hidden");
         }
-
     } catch (error) {
+        if (epoch !== approvalEpoch[kind]) return;
+        pendingApprovals[kind] = null;
+        uiMessage(ui.error, "Cannot verify this request. Waiting for the local backend.");
+    }
+    approvalButtons(kind);
+    if (kind === "connection") renderDevices();
+}
 
-        console.error(
-            "Unable to check connection request:",
-            error
-        );
+async function decideIncomingRequest(kind, accept) {
+    if (approvalBusy[kind] || !pendingApprovals[kind]) return;
+    const captured = pendingApprovals[kind];
+    const capturedKey = incomingKey(kind, captured);
+    approvalBusy[kind] = true;
+    approvalEpoch[kind]++;
+    if (kind === "connection") connectionEpoch++;
+    approvalButtons(kind);
+    try {
+        const prefix = "/api/" + (kind === "connection" ? "connection" : "transfer");
+        const fresh = await readApi(prefix + "/pending");
+        if (incomingKey(kind, fresh) !== capturedKey) {
+            throw Error("This request expired or changed. Review the current request before deciding.");
+        }
+        const result = await readApi(prefix + (accept ? "/accept" : "/reject"), { method: "POST" });
+        if (result.success !== true) throw Error(result.error || "Could not " + (accept ? "accept" : "reject") + " this request.");
+        approvalEpoch[kind]++;
+        pendingApprovals[kind] = null;
+        approvalUi[kind].box.classList.add("hidden");
+        uiMessage(approvalUi[kind].error, "");
+        const outcome = (accept ? "Accepted" : "Rejected") + " incoming " +
+            (kind === "connection" ? "connection request from " + captured.ip : "file request: " + captured.fileName) + ".";
+        uiMessage("connectionNotice", outcome);
+        if (kind === "file") uiMessage("transferResult", outcome);
+        if (kind === "connection") await loadConnectionStatus();
+    } catch (error) {
+        uiMessage(approvalUi[kind].error, error.message);
+        uiMessage("connectionNotice", error.message);
+    } finally {
+        approvalBusy[kind] = false;
+        await refreshIncomingRequest(kind);
+        approvalButtons(kind);
     }
 }
 
+async function checkPendingConnection() {
+    await refreshIncomingRequest("connection");
+}
 
 // Get current TCP connection status
 async function loadConnectionStatus() {
+    const epoch = connectionEpoch;
+    const requestNumber = ++connectionStatusRequest;
 
     try {
 
-        const response =
-            await fetch("/api/connection/status");
+        const state = await readApi("/api/connection/status");
+        if (epoch !== connectionEpoch || requestNumber !== connectionStatusRequest) return;
+        if (!["connected", "connecting", "pending", "disconnected"].includes(state.status)) {
+            throw Error("Invalid connection status");
+        }
+        if (outgoingConnectionAttempt && state.peerIp && state.peerIp !== outgoingConnectionAttempt.ip &&
+            ["connected", "connecting", "pending"].includes(state.status)) {
+            uiMessage("connectionNotice", "Another connection or request is active with " + state.peerIp +
+                ". Your request to " + outgoingConnectionAttempt.ip + " was not confirmed.");
+            outgoingConnectionAttempt = null;
+        } else if (outgoingConnectionAttempt && state.status === "connected") {
+            uiMessage("connectionNotice", "Connected to " + state.peerIp + ".");
+            outgoingConnectionAttempt = null;
+        } else if (outgoingConnectionAttempt && state.status === "disconnected" && !connectionRequestInFlight) {
+            uiMessage("connectionNotice", "The request to " + outgoingConnectionAttempt.ip +
+                " ended without acceptance. The peer may have rejected it or the connection failed. You can request again.");
+            outgoingConnectionAttempt = null;
+        } else if (currentConnectionStatus.status === "connected" && state.status === "disconnected") {
+            uiMessage("connectionNotice", "Disconnected from " + currentConnectionStatus.peerIp + ".");
+        }
+        publishConnection(state);
 
-        currentConnectionStatus =
-            await response.json();
-
+        // Clear controls from the previous connection during reconnect/pending
+        // states as well as after a full disconnect.
+        if (currentConnectionStatus.status !== "connected") {
+            fileInput.disabled = true;
+            sendFileButton.disabled = true;
+            sourceFolderPath.disabled = true;
+            destinationFolderPath.disabled = true;
+            syncFolderButton.disabled = true;
+            transferControls.classList.add("hidden");
+            if (window.phase43SetConnected) window.phase43SetConnected(false);
+        }
 
         if (currentConnectionStatus.status === "connected") {
 
@@ -154,7 +269,7 @@ async function loadConnectionStatus() {
             destinationFolderPath.disabled = false;
             syncFolderButton.disabled = false;
             if (window.phase43SetConnected) {
-                window.phase43SetConnected(true);
+                window.phase43SetConnected(true, currentConnectionStatus.peerIp);
             }
 
             if (
@@ -197,7 +312,7 @@ async function loadConnectionStatus() {
                 progressBar.style.width = `${percent}%`;
 
                 progressText.textContent =
-                    `${sentMB} MB / ${totalMB} MB (${percent}%)`;
+                    `${sentMB} MiB / ${totalMB} MiB (${percent}%)`;
 
 
                 if (outStatus.status === "transferring") {
@@ -223,7 +338,7 @@ async function loadConnectionStatus() {
 
                     pauseButton.classList.add("hidden");
                     resumeButton.classList.add("hidden");
-                    cancelButton.classList.remove("hidden");
+                    cancelButton.classList.add("hidden");
 
                 }
 
@@ -235,6 +350,12 @@ async function loadConnectionStatus() {
                     pauseButton.classList.add("hidden");
                     resumeButton.classList.add("hidden");
                     cancelButton.classList.remove("hidden");
+                }
+                else if (outStatus.status === "verifying") {
+                    transferFileName.textContent = `Verifying: ${outStatus.fileName}`;
+                    pauseButton.classList.add("hidden");
+                    resumeButton.classList.add("hidden");
+                    cancelButton.classList.add("hidden");
                 }
 
             }
@@ -280,6 +401,7 @@ async function loadConnectionStatus() {
 
             statusText.textContent =
                 "Not connected";
+            transferControls.classList.add("hidden");
 
             fileInput.disabled = true;
             sendFileButton.disabled = true;
@@ -307,164 +429,143 @@ async function loadConnectionStatus() {
             "Unable to load connection status:",
             error
         );
+        if (epoch !== connectionEpoch || requestNumber !== connectionStatusRequest) return;
+        publishConnection({ status: "unavailable", connected: false, peerIp: null });
+        fileInput.disabled = true;
+        sendFileButton.disabled = true;
+        sourceFolderPath.disabled = true;
+        destinationFolderPath.disabled = true;
+        syncFolderButton.disabled = true;
+        transferControls.classList.add("hidden");
+        if (window.phase43SetConnected) window.phase43SetConnected(false);
     }
 }
 
 
-// Load discovered devices
+// Load actual devices from the existing UDP discovery registry.
 async function loadDevices() {
-
     try {
-
-        const response =
-            await fetch("/api/devices");
-
-        const devices =
-            await response.json();
-
-
-        deviceList.innerHTML = "";
-
-
-        if (devices.length === 0) {
-
-            deviceList.innerHTML =
-                "<p>No devices found.</p>";
-
-            return;
-        }
-
-
-        devices.forEach((device) => {
-
-            const deviceBox =
-                document.createElement("div");
-
-            deviceBox.className = "device";
-
-
-            const isConnectedDevice =
-                currentConnectionStatus.connected &&
-                currentConnectionStatus.peerIp === device.ip;
-
-
-            const connectionBusy =
-                currentConnectionStatus.status !==
-                "disconnected";
-
-
-            let buttonText = "Connect";
-
-            if (isConnectedDevice) {
-                buttonText = "Connected";
-            }
-
-
-            deviceBox.innerHTML = `
-                <strong>${device.deviceName}</strong>
-                <p>${device.ip}</p>
-
-                <button
-                    class="connectButton"
-                    ${connectionBusy ? "disabled" : ""}
-                >
-                    ${buttonText}
-                </button>
-            `;
-
-
-            const connectButton =
-                deviceBox.querySelector(".connectButton");
-
-
-            connectButton.addEventListener(
-                "click",
-                async () => {
-
-                    try {
-
-                        const response =
-                            await fetch(
-                                "/api/connection/connect",
-                                {
-                                    method: "POST",
-
-                                    headers: {
-                                        "Content-Type":
-                                            "application/json"
-                                    },
-
-                                    body: JSON.stringify({
-                                        ip: device.ip
-                                    })
-                                }
-                            );
-
-
-                        const result =
-                            await response.json();
-
-
-                        if (result.success) {
-
-                            statusText.textContent =
-                                `Connecting to ${device.deviceName}...`;
-                        }
-
-                    } catch (error) {
-
-                        console.error(
-                            "Unable to connect:",
-                            error
-                        );
-                    }
-                }
-            );
-
-
-            deviceList.appendChild(deviceBox);
+        const devices = await readApi("/api/devices");
+        if (!Array.isArray(devices)) throw Error("Invalid device discovery response");
+        const seen = new Set();
+        discoveredDevices = devices.filter(device => {
+            if (!device || !validDeviceIp(device.ip) || seen.has(device.ip)) return false;
+            seen.add(device.ip);
+            return true;
         });
-
+        discoveryAvailable = true;
+        if (window.syncUI) window.syncUI.setDevices(discoveredDevices);
+        renderDevices();
     } catch (error) {
-
-        console.error(
-            "Unable to load devices:",
-            error
-        );
+        discoveryAvailable = false;
+        renderDevices();
+        uiMessage("devicesFeedback", "Device discovery is unavailable. Check the local backend and refresh.");
     }
 }
 
-// Check for incoming file transfer requests
-async function checkPendingFileRequest() {
-
-    try {
-
-        const response =
-            await fetch("/api/transfer/pending");
-
-        const data =
-            await response.json();
-
-
-        if (data.pending) {
-
-            fileRequestBox.classList.remove("hidden");
-
-            fileRequestMessage.textContent =
-                `${data.fileName} (${data.fileSize} bytes)`;
-
-        } else {
-
-            fileRequestBox.classList.add("hidden");
-        }
-
-    } catch (error) {
-
-        console.error(
-            "Unable to check file transfer request:",
-            error
-        );
+function renderDevices() {
+    const busy = connectionRequestInFlight || !!outgoingConnectionAttempt ||
+        !!pendingApprovals.connection || currentConnectionStatus.status !== "disconnected";
+    const key = JSON.stringify({
+        devices: discoveredDevices.map(device => [device.deviceName, device.ip]),
+        status: currentConnectionStatus.status, peer: currentConnectionStatus.peerIp,
+        busy, discoveryAvailable, attempt: outgoingConnectionAttempt?.ip
+    });
+    if (key === previousDeviceListKey) return;
+    previousDeviceListKey = key;
+    deviceList.innerHTML = "";
+    if (!discoveredDevices.length) {
+        deviceList.innerHTML = '<div class="empty-state"><h3>No devices nearby yet</h3><p>Open SyncLAN on another PC on the same local network.</p></div>';
     }
+    uiMessage("devicesFeedback", !discoveryAvailable ? "Checking LAN discovery…" :
+        busy ? "Connection requests are paused while a connection or approval is active." :
+        "Select a device and request a connection. The receiving PC must accept.");
+    for (const device of discoveredDevices) {
+        const row = document.createElement("div");
+        row.className = "device";
+        const avatar = document.createElement("span");
+        avatar.className = "device-icon";
+        avatar.setAttribute("aria-hidden", "true");
+        avatar.textContent = "PC";
+        const details = document.createElement("div");
+        details.className = "device-details";
+        const name = document.createElement("strong");
+        const deviceName = typeof device.deviceName === "string" ? device.deviceName : "LAN device";
+        name.textContent = deviceName;
+        const address = document.createElement("p");
+        address.textContent = device.ip;
+        const state = document.createElement("span");
+        state.className = "device-state";
+        const isPeer = currentConnectionStatus.peerIp === device.ip;
+        const isConnected = isPeer && currentConnectionStatus.status === "connected";
+        const isConnecting = (isPeer && currentConnectionStatus.status === "connecting") ||
+            outgoingConnectionAttempt?.ip === device.ip;
+        const isPending = pendingApprovals.connection?.ip === device.ip ||
+            (isPeer && currentConnectionStatus.status === "pending");
+        const stateName = isConnected ? "connected" : isPending ? "pending" : isConnecting ? "connecting" : "disconnected";
+        state.dataset.state = stateName;
+        state.textContent = isConnected ? "Connected" : isPending ? "Incoming request · accept or reject above" :
+            isConnecting ? "Connecting · waiting for peer approval" :
+            !discoveryAvailable ? "Discovery unavailable · availability unconfirmed" : "Discovered · not connected";
+        details.append(name, address, state);
+        const button = document.createElement("button");
+        button.className = "connectButton";
+        button.textContent = isConnected ? "Connected" : isPending ? "Incoming request" :
+            isConnecting ? "Request sent" : "Request Connection";
+        button.disabled = busy || !discoveryAvailable;
+        button.setAttribute("aria-label", button.textContent + ": " + deviceName + " (" + device.ip + ")");
+        button.addEventListener("click", () => requestDeviceConnection(device.ip));
+        row.append(avatar, details, button);
+        deviceList.appendChild(row);
+    }
+}
+
+async function requestDeviceConnection(ip) {
+    if (connectionRequestInFlight || outgoingConnectionAttempt || pendingApprovals.connection ||
+        currentConnectionStatus.status !== "disconnected" || !discoveryAvailable ||
+        !validDeviceIp(ip) || !discoveredDevices.some(device => device.ip === ip)) return;
+    connectionRequestInFlight = true;
+    renderDevices();
+    try {
+        // Revalidate rather than trusting a possibly stale device row or tab.
+        const status = await readApi("/api/connection/status");
+        if (status.status !== "disconnected") {
+            publishConnection(status);
+            throw Error("A connection or incoming approval is already active.");
+        }
+        await loadDevices();
+        if (!discoveryAvailable || !discoveredDevices.some(device => device.ip === ip)) {
+            throw Error("This device is no longer available in LAN discovery.");
+        }
+        const pending = await readApi("/api/connection/pending");
+        if (pending.pending) {
+            await checkPendingConnection();
+            throw Error("Accept or reject the incoming connection request first.");
+        }
+        outgoingConnectionAttempt = { ip };
+        connectionEpoch++;
+        uiMessage("connectionNotice", "Sending connection request to " + ip + "…");
+        renderDevices();
+        const result = await readApi("/api/connection/connect", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ip })
+        });
+        if (result.success !== true) throw Error("The connection request was not accepted by the local backend.");
+        uiMessage("connectionNotice", "Connection request sent to " + ip + ". Waiting for the receiving PC to accept or reject.");
+    } catch (error) {
+        outgoingConnectionAttempt = null;
+        uiMessage("connectionNotice", error.message);
+    } finally {
+        connectionRequestInFlight = false;
+        await loadConnectionStatus();
+        renderDevices();
+    }
+}
+
+document.getElementById("refreshDevices").addEventListener("click", loadDevices);
+
+// Check incoming file approvals independently of the active sidebar view.
+async function checkPendingFileRequest() {
+    await refreshIncomingRequest("file");
 }
 
 // Display selected file information
@@ -547,72 +648,11 @@ sendFileButton.addEventListener("click", async () => {
 });
 
 
-// Accept incoming connection
-acceptButton.addEventListener(
-    "click",
-    async () => {
-
-        await fetch(
-            "/api/connection/accept",
-            {
-                method: "POST"
-            }
-        );
-
-        requestBox.classList.add("hidden");
-    }
-);
-
-
-// Reject incoming connection
-rejectButton.addEventListener(
-    "click",
-    async () => {
-
-        await fetch(
-            "/api/connection/reject",
-            {
-                method: "POST"
-            }
-        );
-
-        requestBox.classList.add("hidden");
-    }
-);
-
-// Accept incoming file transfer
-acceptFileButton.addEventListener(
-    "click",
-    async () => {
-
-        await fetch(
-            "/api/transfer/accept",
-            {
-                method: "POST"
-            }
-        );
-
-        fileRequestBox.classList.add("hidden");
-    }
-);
-
-
-// Reject incoming file transfer
-rejectFileButton.addEventListener(
-    "click",
-    async () => {
-
-        await fetch(
-            "/api/transfer/reject",
-            {
-                method: "POST"
-            }
-        );
-
-        fileRequestBox.classList.add("hidden");
-    }
-);
-
+// Keep connection and file decisions explicit; navigation never invokes these.
+acceptButton.addEventListener("click", () => decideIncomingRequest("connection", true));
+rejectButton.addEventListener("click", () => decideIncomingRequest("connection", false));
+acceptFileButton.addEventListener("click", () => decideIncomingRequest("file", true));
+rejectFileButton.addEventListener("click", () => decideIncomingRequest("file", false));
 
 // Check incoming requests every second
 setInterval(

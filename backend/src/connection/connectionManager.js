@@ -197,7 +197,20 @@ class ConnectionManager {
                                 "Ready to send file data"
                             );
 
-                            this.transferManager.sendFile(fileSocket);
+                            const transfer = this.transferManager.activeTransfer;
+
+                            if (!transfer || transfer.transferId !== transferId) {
+                                console.error(
+                                    `Transfer acceptance does not match active transfer: ${transferId}`
+                                );
+                                fileSocket.destroy();
+                                return;
+                            }
+
+                            this.transferManager.sendFile(
+                                fileSocket,
+                                transfer.resumeMode === true
+                            );
 
                         })
                         .catch((error) => {
@@ -211,6 +224,10 @@ class ConnectionManager {
 
                 if (message.type === "FILE_TRANSFER_REJECTED") {
                     console.log("File transfer rejected by peer");
+                    if (this.transferManager.activeTransfer?.status === "pending" &&
+                        (!message.transferId || message.transferId === this.transferManager.activeTransfer.transferId)) {
+                        this.transferManager.finishTransfer("rejected");
+                    }
                 }
 
                 if (
@@ -315,6 +332,10 @@ class ConnectionManager {
             // Reset state only if this was the active/pending peer
             if (this.connectionState.peerIp === ip) {
                 this.connectionState.reset();
+                const transfer = this.transferManager.activeTransfer;
+                if (transfer?.status === "pending" && transfer.controlSocket === socket) {
+                    this.transferManager.finishTransfer("interrupted", transfer);
+                }
             }
         });
 
@@ -440,7 +461,20 @@ if (message.type === "FILE_TRANSFER_ACCEPTED") {
                                 "Ready to send file data"
                             );
 
-                            this.transferManager.sendFile(fileSocket);
+                            const transfer = this.transferManager.activeTransfer;
+
+                            if (!transfer || transfer.transferId !== transferId) {
+                                console.error(
+                                    `Transfer acceptance does not match active transfer: ${transferId}`
+                                );
+                                fileSocket.destroy();
+                                return;
+                            }
+
+                            this.transferManager.sendFile(
+                                fileSocket,
+                                transfer.resumeMode === true
+                            );
 
                         })
                         .catch((error) => {
@@ -453,6 +487,10 @@ if (message.type === "FILE_TRANSFER_ACCEPTED") {
                 }
 if (message.type === "FILE_TRANSFER_REJECTED") {
                     console.log("File transfer rejected by peer");
+                    if (this.transferManager.activeTransfer?.status === "pending" &&
+                        (!message.transferId || message.transferId === this.transferManager.activeTransfer.transferId)) {
+                        this.transferManager.finishTransfer("rejected");
+                    }
                 }
 if (
                     message.type ===

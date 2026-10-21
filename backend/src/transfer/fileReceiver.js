@@ -49,8 +49,32 @@ class FileReceiver {
         initialData,
         isFolderSync = false,
         relativePath = null,
-        destinationPath = null
+        destinationPath = null,
+        resumeState = null,
+        onFinalized = null,
+        onProgress = null
     ) {
+
+        // PHASE44B_RESUME_RECEIVER_V1
+        // resumeState must be produced by verifyCheckpoint().
+        if (resumeState) {
+            if (
+                isFolderSync ||
+                resumeState.transferId !== transferId ||
+                resumeState.fileName !== path.basename(fileName) ||
+                resumeState.fileSize !== fileSize ||
+                resumeState.fileHash !== fileHash ||
+                !Number.isSafeInteger(resumeState.verifiedBytes) ||
+                !Number.isSafeInteger(resumeState.nextChunk) ||
+                resumeState.verifiedBytes < 0 ||
+                resumeState.verifiedBytes > fileSize ||
+                resumeState.nextChunk < 0 ||
+                resumeState.nextChunk !== Math.ceil(resumeState.verifiedBytes / (64 * 1024)) ||
+                (resumeState.verifiedBytes !== fileSize && resumeState.verifiedBytes % (64 * 1024) !== 0)
+            ) {
+                throw new Error("Invalid verified resume state");
+            }
+        }
 
         let filePath;
 
@@ -220,30 +244,79 @@ class FileReceiver {
             }
             : null;
 
-        // This step does not reuse an older partial file.
-        // Step 4.4B.3 will add validated resume negotiation.
-        if (checkpointPath && fs.existsSync(checkpointPath)) {
+        // Existing checkpoints require explicit, verified recovery.
+        if (checkpointPath && fs.existsSync(checkpointPath) && !resumeState) {
             throw new Error(
-                "An existing interrupted checkpoint was found " +
-                "for this transfer ID. Resume support is not " +
-                "installed yet; refusing to overwrite it."
+                "An existing checkpoint was found for this transfer ID. " +
+                "An explicit verified resume is required."
             );
         }
 
-        const fileDescriptor =
-        fs.openSync(
+        if (resumeState) {
+            if (
+                !checkpointPath ||
+                resumeState.checkpointPath !== checkpointPath ||
+                path.resolve(resumeState.filePath) !== path.resolve(filePath) ||
+                !fs.existsSync(checkpointPath)
+            ) {
+                throw new Error("Resume checkpoint does not match destination");
+            }
+        }
+
+        const activeCheckpoint = resumeState
+            ? JSON.parse(fs.readFileSync(checkpointPath, "utf8"))
+            : checkpoint;
+
+        // Never truncate a verified partial file.
+        const fileDescriptor = fs.openSync(
             filePath,
-            "w"
+            resumeState ? "r+" : (isFolderSync ? "w" : "wx")
         );
 
-        let receivedBytes = 0;
+        let receivedBytes = resumeState
+            ? resumeState.verifiedBytes
+            : 0;
         let transferCompleted = false;
+        // PHASE44B_RECEIVER_FINALIZATION_SIGNAL_V1
+        let finalizationSignaled = false;
+        const reportProgress = (status) => {
+            if (typeof onProgress === "function") {
+                onProgress({ status, receivedBytes });
+            }
+        };
 
-        if (checkpoint) {
-            FileReceiver.saveCheckpoint(
-                checkpointPath,
-                checkpoint
-            );
+        const signalFinalized = () => {
+            if (finalizationSignaled) return;
+            finalizationSignaled = true;
+
+            if (typeof onFinalized === "function") {
+                onFinalized();
+            }
+        };
+
+        try {
+            if (activeCheckpoint) {
+                if (resumeState) {
+                    // Retain only the contiguous chunks independently verified
+                    // by resumeCheckpoint.js.
+                    const verifiedChunks = {};
+                    for (let index = 0; index < resumeState.nextChunk; index++) {
+                        verifiedChunks[String(index)] =
+                            activeCheckpoint.verifiedChunks[String(index)];
+                    }
+                    activeCheckpoint.verifiedChunks = verifiedChunks;
+                    activeCheckpoint.verifiedBytes = receivedBytes;
+                    activeCheckpoint.status = "receiving";
+                    activeCheckpoint.updatedAt = new Date().toISOString();
+                }
+
+                FileReceiver.saveCheckpoint(checkpointPath, activeCheckpoint);
+            }
+        } catch (error) {
+            // The server may release the ID after this synchronous failure.
+            // Close first so a retry cannot race an abandoned descriptor.
+            fs.closeSync(fileDescriptor);
+            throw error;
         }
 
         const parseChunk = 
@@ -425,40 +498,61 @@ class FileReceiver {
                 metadata.chunkNumber *
                 (64 * 1024);
 
-
-            fs.writeSync(
-                fileDescriptor,
-                dataToVerify,
-                0,
-                dataToVerify.length,
-                chunkPosition
+            // Only accept the next expected chunk. This prevents
+            // duplicate/out-of-order frames from corrupting resume state.
+            const expectedChunk = Math.floor(
+                receivedBytes / (64 * 1024)
             );
+
+            if (
+                !Number.isSafeInteger(metadata.chunkNumber) ||
+                metadata.chunkNumber !== expectedChunk ||
+                dataToVerify.length !== Math.min(
+                    64 * 1024,
+                    fileSize - receivedBytes
+                )
+            ) {
+                console.error(
+                    "Unexpected chunk during transfer:",
+                    metadata.chunkNumber,
+                    "expected:",
+                    expectedChunk
+                );
+                socket.destroy();
+                return;
+            }
+
+            let written = 0;
+            while (written < dataToVerify.length) {
+                const count = fs.writeSync(fileDescriptor, dataToVerify, written,
+                    dataToVerify.length - written, chunkPosition + written);
+                if (count <= 0) throw new Error("Could not write complete chunk");
+                written += count;
+            }
 
             receivedBytes +=
                 dataToVerify.length;
 
 
-            if (checkpoint) {
+            if (activeCheckpoint) {
                 // Ensure the verified bytes reach the file before
                 // recording them in the persistent checkpoint.
                 fs.fsyncSync(fileDescriptor);
 
-                checkpoint.verifiedChunks[
+                activeCheckpoint.verifiedChunks[
                     String(metadata.chunkNumber)
                 ] = {
                     size: dataToVerify.length,
                     hash: calculatedHash
                 };
 
-                checkpoint.verifiedBytes = receivedBytes;
-                checkpoint.updatedAt =
+                activeCheckpoint.verifiedBytes = receivedBytes;
+                activeCheckpoint.updatedAt =
                     new Date().toISOString();
 
-                FileReceiver.saveCheckpoint(
-                    checkpointPath,
-                    checkpoint
-                );
+                FileReceiver.saveCheckpoint(checkpointPath, activeCheckpoint);
             }
+            reportProgress("receiving");
 
             socket.write(
                 JSON.stringify({
@@ -506,6 +600,7 @@ class FileReceiver {
             }
 
             transferCompleted = true;
+            reportProgress("verifying");
 
             socket.removeListener(
                 "data",
@@ -545,37 +640,45 @@ class FileReceiver {
                     );
 
 
+                // PHASE44B_PRESERVE_INTEGRITY_FAILURE_V1
                 if (!fileValid) {
-
+                    reportProgress("integrity_failed");
                     console.error(
                         "FINAL FILE SHA-256 VERIFICATION FAILED"
                     );
 
-                    FileReceiver.removeCheckpoint(
-                        checkpointPath
-                    );
+                    if (activeCheckpoint) {
+                        // Preserve the file and checkpoint for investigation.
+                        // Do not label the file as successfully verified.
+                        activeCheckpoint.status = "integrity_failed";
+                        activeCheckpoint.updatedAt = new Date().toISOString();
 
+                        FileReceiver.saveCheckpoint(
+                            checkpointPath,
+                            activeCheckpoint
+                        );
 
-                    fs.unlink(
-                        filePath,
-                        (error) => {
+                        console.error(
+                            "Failed-integrity file and checkpoint preserved:",
+                            filePath
+                        );
+                    } else {
+                        // Preserve the original non-checkpoint transfer behavior.
+                        await new Promise((resolve) => {
+                            fs.unlink(filePath, (error) => {
+                                if (error) console.error("Could not delete failed file:", error.message);
+                                resolve();
+                            });
+                        });
+                    }
 
-                            if (!error) {
-
-                                console.log(
-                                    "Deleted file that failed final integrity verification"
-                                );
-                            }
-                        }
-                    );
-
-
-                    socket.write(
-                        JSON.stringify({
-                            type:
-                                "FILE_INTEGRITY_FAILED"
-                        }) + "\n"
-                    );
+                    if (!socket.destroyed) {
+                        socket.write(
+                            JSON.stringify({
+                                type: "FILE_INTEGRITY_FAILED"
+                            }) + "\n"
+                        );
+                    }
 
                     return;
                 }
@@ -588,6 +691,7 @@ class FileReceiver {
                 FileReceiver.removeCheckpoint(
                     checkpointPath
                 );
+                reportProgress("completed");
 
 
                 console.log(
@@ -614,16 +718,27 @@ class FileReceiver {
                     "Final file verification error:",
                     error.message
                 );
+                reportProgress("interrupted");
 
                 socket.destroy();
+            } finally {
+                // PHASE44B_FINAL_HASH_SETTLED_V1
+                // Signal only after SHA-256 verification and
+                // its success/failure handling have finished.
+                signalFinalized();
             }
         }
 
         const handleIncomplete = () => {
+            if (transferCompleted) {
+                return;
+            }
 
             if (!transferCompleted) {
 
                 transferCompleted = true;
+                socket.removeListener("data", handleData);
+                reportProgress("interrupted");
 
                 console.error(
                     `File transfer ended early: ${receivedBytes}/${fileSize} bytes`
@@ -644,16 +759,13 @@ class FileReceiver {
                 }
 
 
-                if (checkpoint) {
-                    checkpoint.status = "interrupted";
-                    checkpoint.updatedAt =
+                if (activeCheckpoint) {
+                    activeCheckpoint.status = "interrupted";
+                    activeCheckpoint.updatedAt =
                         new Date().toISOString();
 
                     try {
-                        FileReceiver.saveCheckpoint(
-                            checkpointPath,
-                            checkpoint
-                        );
+                        FileReceiver.saveCheckpoint(checkpointPath, activeCheckpoint);
 
                         console.log(
                             "Phase 4.4B: Interrupted file preserved:",
@@ -680,10 +792,16 @@ class FileReceiver {
                                     `Deleted partially downloaded file: ${filePath}`
                                 );
                             }
+                            signalFinalized();
                         }
                     );
+                    return;
                 }
             }
+            // PHASE44B_INTERRUPTED_FINALIZATION_SIGNAL_V1
+            // The file descriptor and checkpoint cleanup have
+            // finished before the transfer lock can be released.
+            signalFinalized();
         };
 
 
@@ -691,15 +809,6 @@ class FileReceiver {
             "data",
             handleData
         );
-
-
-        if (
-            initialData &&
-            initialData.length > 0
-        ) {
-
-            handleData(initialData);
-        }
 
 
         socket.on(
@@ -726,6 +835,14 @@ class FileReceiver {
                 handleIncomplete();
             }
         );
+
+        // Install cleanup handlers before processing coalesced header/chunk data.
+        reportProgress("receiving");
+        if (fileSize === receivedBytes) {
+            completeTransfer();
+        } else if (initialData && initialData.length > 0) {
+            handleData(initialData);
+        }
     }
 }
 
