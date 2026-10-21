@@ -69,6 +69,217 @@ class WebServer {
     // Handle requests coming from the browser
     handleRequest(req, res) {
 
+        // PHASE44A_API: local-only PIN and QR pairing.
+
+        if (
+            req.url === "/api/pairing/create" &&
+            req.method === "POST"
+        ) {
+            const os = require("os");
+            const QRCode = require("qrcode");
+
+            const interfaces = os.networkInterfaces();
+
+            const isValidIPv4 = (name, network) => {
+                return (
+                    network &&
+                    network.family === "IPv4" &&
+                    !network.internal &&
+                    !/virtualbox|vbox|vmware|hyper-v|hyperv|vethernet|wsl|docker|loopback/i.test(name) &&
+                    !network.address.startsWith("192.168.56.") &&
+                    !network.address.startsWith("169.254.")
+                );
+            };
+
+            // Put Wi-Fi addresses first.
+            const ips = Object.entries(interfaces)
+                .sort(([nameA], [nameB]) => {
+                    const a = /wi-?fi|wlan/i.test(nameA) ? 0 : 1;
+                    const b = /wi-?fi|wlan/i.test(nameB) ? 0 : 1;
+                    return a - b;
+                })
+                .flatMap(([name, networks]) =>
+                    networks
+                        .filter(network => isValidIPv4(name, network))
+                        .map(network => network.address)
+                );
+
+            if (!ips.length) {
+                res.writeHead(400, {
+                    "Content-Type": "application/json"
+                });
+
+                res.end(JSON.stringify({
+                    error: "No LAN IPv4 address found"
+                }));
+
+                return;
+            }
+
+            const pin = String(
+                crypto.randomInt(0, 1000000)
+            ).padStart(6, "0");
+
+            const token = crypto
+                .randomBytes(32)
+                .toString("hex");
+
+            const expires = Date.now() + 120000;
+
+            this.tcpServer.phase44Pair = {
+                pin,
+                token,
+                expires
+            };
+
+            const payload = JSON.stringify({
+                app: "SyncLAN",
+                version: 1,
+                ip: ips[0],
+                token
+            });
+
+            QRCode.toDataURL(payload, {
+                errorCorrectionLevel: "M",
+                width: 300,
+                margin: 2
+            })
+                .then(qr => {
+                    res.writeHead(200, {
+                        "Content-Type":
+                            "application/json",
+                        "Cache-Control": "no-store"
+                    });
+
+                    res.end(JSON.stringify({
+                        pin,
+                        qr,
+                        ips,
+                        expires
+                    }));
+                })
+                .catch(e => {
+                    res.writeHead(500, {
+                        "Content-Type":
+                            "application/json"
+                    });
+
+                    res.end(JSON.stringify({
+                        error: e.message
+                    }));
+                });
+
+            return;
+        }
+
+        if (
+            req.url === "/api/pairing/connect" &&
+            req.method === "POST"
+        ) {
+            let body = "";
+
+            req.on("data", c => {
+                body += c;
+
+                if (body.length > 4096) {
+                    req.destroy();
+                }
+            });
+
+            req.on("end", () => {
+                try {
+                    const data = JSON.parse(body);
+
+                    const ip = String(data.ip || "");
+                    const kind = data.kind;
+                    const value = String(data.value || "");
+
+                    const validIp =
+                        /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) &&
+                        ip.split(".").every(
+                            x => Number(x) <= 255
+                        );
+
+                    const validCredential =
+                        (
+                            kind === "pin" &&
+                            /^\d{6}$/.test(value)
+                        ) ||
+                        (
+                            kind === "qr" &&
+                            /^[a-f0-9]{64}$/.test(value)
+                        );
+
+                    if (
+                        !validIp ||
+                        !validCredential
+                    ) {
+                        throw Error(
+                            "Invalid IP or pairing credential"
+                        );
+                    }
+
+                    if (
+                        this.connectionManager
+                            .connectionState.status !==
+                        "disconnected"
+                    ) {
+                        throw Error(
+                            "Disconnect existing peer first"
+                        );
+                    }
+
+                    this.connectionManager
+                        .connectToDevice(
+                            ip,
+                            { kind, value }
+                        );
+
+                    res.writeHead(200, {
+                        "Content-Type":
+                            "application/json"
+                    });
+
+                    res.end(JSON.stringify({
+                        success: true,
+                        message: "Pairing request sent"
+                    }));
+
+                } catch (e) {
+                    res.writeHead(400, {
+                        "Content-Type":
+                            "application/json"
+                    });
+
+                    res.end(JSON.stringify({
+                        error: e.message
+                    }));
+                }
+            });
+
+            return;
+        }
+
+        // Serve QR decoder locally, without CDN.
+        if (
+            req.url === "/jsqr.js" &&
+            req.method === "GET"
+        ) {
+            const file = require.resolve(
+                "jsqr/dist/jsQR.js"
+            );
+
+            res.writeHead(200, {
+                "Content-Type":
+                    "application/javascript"
+            });
+
+            fs.createReadStream(file).pipe(res);
+
+            return;
+        }
+
+
         
 
         // PHASE43_API: preview, confirm, history.
@@ -1002,6 +1213,11 @@ class WebServer {
                 "../../../frontend/script.js"
             );
 
+        } else if (req.url === "/phase44a.js") {
+            filePath = path.join(
+                __dirname,
+                "../../../frontend/phase44a.js"
+            );
         } else if (req.url === "/phase43.js") {
             filePath = path.join(
                 __dirname,

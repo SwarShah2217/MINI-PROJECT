@@ -171,6 +171,94 @@
     <script src="phase42.js"></script>
 
 <script src="/phase43.js"></script>
+
+<section
+    id="phase44a"
+    style="
+        border:1px solid #888;
+        padding:16px;
+        margin:16px 0;
+    "
+>
+    <h2>Phase 4.4A — PIN / QR Pairing</h2>
+
+    <p>
+        On PC1, generate a temporary code.
+        On PC2, enter its LAN IP and PIN,
+        or upload a photo of its QR code.
+    </p>
+
+    <button id="p44create">
+        Generate PIN + QR (this PC)
+    </button>
+
+    <p id="p44expiry"></p>
+
+    <strong
+        id="p44pin"
+        style="font-size:26px"
+    ></strong>
+
+    <div>
+        <img
+            id="p44qr"
+            alt="Pairing QR"
+            style="
+                max-width:300px;
+                display:none;
+            "
+        >
+    </div>
+
+    <p id="p44ip"></p>
+
+    <hr>
+
+    <label>
+        PC1 LAN IP
+        <input
+            id="p44host"
+            placeholder="192.168.1.10"
+        >
+    </label>
+
+    <label>
+        6-digit PIN
+        <input
+            id="p44code"
+            inputmode="numeric"
+            maxlength="6"
+            placeholder="123456"
+        >
+    </label>
+
+    <button id="p44connect">
+        Pair with PIN
+    </button>
+
+    <p>
+        Or choose a photo of the QR code from PC1:
+    </p>
+
+    <input
+        id="p44photo"
+        type="file"
+        accept="image/*"
+    >
+
+    <button id="p44decode">
+        Decode photo and pair
+    </button>
+
+    <p
+        id="p44status"
+        role="status"
+    ></p>
+</section>
+
+<script src="/jsqr.js"></script>
+<script src="/phase44a.js"></script>
+
 </body>
 
 </html>

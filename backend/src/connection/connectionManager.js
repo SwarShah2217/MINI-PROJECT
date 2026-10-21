@@ -21,7 +21,7 @@ class ConnectionManager {
         this.pendingFolderDestinationPath = null;
     }
 
-    connectToDevice(ip) {
+    connectToDevice(ip, phase44Credential = null) {
 
         // Prevent duplicate connection requests
         if (this.connectionState.status !== "disconnected") {
@@ -42,7 +42,8 @@ class ConnectionManager {
 
                 // Send a connection request to the selected device
                 const request = {
-                    type: "CONNECTION_REQUEST"
+                    type: "CONNECTION_REQUEST",
+                    phase44Credential
                 };
 
                 socket.write(

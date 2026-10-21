@@ -1,4 +1,5 @@
 const net = require("net");
+const crypto44 = require("crypto");
 
 const { TCP_PORT } = require("../config");
 const KeyExchangeService =
@@ -21,6 +22,8 @@ class TCPServer {
 
         // No incoming request initially
         this.pendingSocket = null;
+        this.phase44Pair = null;
+        this.phase44Failures = new Map();
 
         // No file transfer request is pending initially
         this.pendingFileRequest = null;
@@ -115,6 +118,107 @@ class TCPServer {
                 }
 
                 if (message.type === "CONNECTION_REQUEST") {
+
+                    // PHASE44A: optional pairing credential.
+                    // Existing manual connections remain supported.
+
+                    if (message.phase44Credential) {
+
+                        const p = this.phase44Pair;
+                        const now = Date.now();
+
+                        const attempts =
+                            this.phase44Failures.get(peerIp) ||
+                            { count: 0, until: 0 };
+
+                        const supplied = String(
+                            message.phase44Credential.value || ""
+                        );
+
+                        const kind =
+                            message.phase44Credential.kind;
+
+                        const expected =
+                            p && kind === "qr"
+                                ? p.token
+                                : p && p.pin;
+
+                        const validFormat =
+                            (kind === "qr" &&
+                                supplied.length === 64) ||
+                            (kind === "pin" &&
+                                /^[0-9]{6}$/.test(supplied));
+
+                        const match =
+                            p &&
+                            now < p.expires &&
+                            now >= attempts.until &&
+                            validFormat &&
+                            expected &&
+                            supplied.length === expected.length &&
+                            crypto44.timingSafeEqual(
+                                Buffer.from(supplied),
+                                Buffer.from(expected)
+                            );
+
+                        if (!match) {
+
+                            attempts.count++;
+
+                            if (attempts.count >= 5) {
+                                attempts.until = now + 60000;
+                                attempts.count = 0;
+                            }
+
+                            this.phase44Failures.set(
+                                peerIp,
+                                attempts
+                            );
+
+                            socket.write(
+                                JSON.stringify({
+                                    type: "CONNECTION_REJECTED",
+                                    reason:
+                                        "Invalid or expired pairing code"
+                                }) + "\n"
+                            );
+
+                            socket.end();
+                            continue;
+                        }
+
+                        if (
+                            this.connectionState.status !==
+                            "disconnected"
+                        ) {
+                            socket.write(
+                                JSON.stringify({
+                                    type: "CONNECTION_REJECTED"
+                                }) + "\n"
+                            );
+
+                            socket.end();
+                            continue;
+                        }
+
+                        // Pairing credential is single-use.
+                        this.phase44Pair = null;
+
+                        this.phase44Failures.delete(peerIp);
+
+                        this.connectionState.setPending(
+                            peerIp,
+                            socket
+                        );
+
+                        this.pendingSocket = socket;
+
+                        // Valid credential: accept connection.
+                        this.acceptConnection();
+
+                        continue;
+                    }
+
 
                     // Only one connection/request is allowed at a time
                     if (this.connectionState.status !== "disconnected") {
